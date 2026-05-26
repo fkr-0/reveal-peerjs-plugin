@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test RevealPeerJS Loading</title>
+</head>
+<body>
+  <h1>Testing RevealPeerJS Loading</h1>
+  <div id="results"></div>
+
+  <script src="dist/reveal-peerjs.js"></script>
+  <script>
+    const results = document.getElementById('results');
+
+    function log(msg, success = true) {
+      const div = document.createElement('div');
+      div.style.color = success ? 'green' : 'red';
+      div.textContent = (success ? '✓ ' : '✗ ') + msg;
+      results.appendChild(div);
+    }
+
+    log('Testing RevealPeerJS loading...');
+
+    setTimeout(() => {
+      // Check if RevealPeerJS is available globally
+      if (typeof RevealPeerJS === 'function') {
+        log('RevealPeerJS is available as a global function');
+      } else {
+        log('RevealPeerJS is NOT available globally', false);
+        console.log('RevealPeerJS:', typeof RevealPeerJS);
+      }
+
+      // Check if it has the required structure
+      if (typeof RevealPeerJS === 'function') {
+        const plugin = RevealPeerJS();
+        if (plugin && typeof plugin.init === 'function') {
+          log('RevealPeerJS has init() method');
+        } else {
+          log('RevealPeerJS does NOT have init() method', false);
+        }
+      }
+
+      // Check styles
+      const styles = document.getElementById('reveal-peerjs-styles');
+      if (styles) {
+        log('Styles are injected');
+      } else {
+        log('Styles are NOT injected', false);
+      }
+
+      log('\nOpen browser console to see RevealPeerJS debug logs');
+    }, 100);
+  </script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+{
+  "name": "reveal-peerjs",
+  "version": "1.0.0",
+  "description": "Reveal.js plugin for real-time peer collaboration via PeerJS",
+  "type": "module",
+  "main": "dist/reveal-peerjs.js",
+  "module": "dist/reveal-peerjs.es.js",
+  "files": ["dist"],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "preview": "vite build && cd example && python3 -m http.server 8080",
+    "dev-server": "node scripts/dev-server.js",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
+    "test:smoke": "playwright test e2e/smoke.spec.js",
+    "preinstall": "npx only-allow pnpm"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0",
+    "@playwright/test": "^1.48.0",
+    "playwright": "^1.48.0"
+  },
+  "dependencies": {
+    "peerjs": "^1.5.4"
+  },
+  "license": "MIT"
+}

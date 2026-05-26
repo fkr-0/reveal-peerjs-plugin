@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RevealPeerJS Demo Presentation</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css">
+  <style>
+    .reveal h1, .reveal h2, .reveal h3 { text-transform: none; }
+    .reveal section { text-align: left; }
+    .reveal .center { text-align: center; }
+    .feature-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-top: 30px;
+    }
+    .feature-card {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      padding: 20px;
+    }
+    .feature-card h4 {
+      color: #4fc3f7;
+      margin-bottom: 8px;
+    }
+    .feature-card p {
+      font-size: 0.8em;
+      color: rgba(255,255,255,0.7);
+      line-height: 1.4;
+    }
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.7em;
+      margin-right: 6px;
+    }
+    .tag-hub { background: rgba(255,167,38,0.3); color: #ffa726; }
+    .tag-chat { background: rgba(79,195,247,0.3); color: #4fc3f7; }
+    .tag-game { background: rgba(76,175,80,0.3); color: #66bb6a; }
+    pre { font-size: 0.55em; }
+  </style>
+</head>
+<body>
+
+<div class="reveal">
+  <div class="slides">
+
+    <section>
+      <h1>RevealPeerJS</h1>
+      <h3 style="color: #4fc3f7">Real-time Collaboration for Reveal.js</h3>
+      <p style="margin-top: 40px; color: rgba(255,255,255,0.6)">
+        Connect all viewers of a slideshow in a shared lobby.<br>
+        Chat, poll, and play games — right inside your presentation.
+      </p>
+      <p style="margin-top: 30px; font-size: 0.7em; color: rgba(255,255,255,0.35)">
+        Look at the bottom-left corner to get started &darr;
+      </p>
+    </section>
+
+    <section>
+      <h2>How It Works</h2>
+      <p>The first visitor to open this presentation becomes the <span class="tag tag-hub">HUB</span>.<br>
+      All subsequent visitors connect as participants in a shared lobby.</p>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <h4>Auto-Discovery</h4>
+          <p>The lobby ID is derived from the page URL. No setup needed — just share the link.</p>
+        </div>
+        <div class="feature-card">
+          <h4>Peer-to-Peer</h4>
+          <p>Powered by PeerJS and WebRTC. No server required beyond the signaling service.</p>
+        </div>
+        <div class="feature-card">
+          <h4>Star Topology</h4>
+          <p>The hub relays messages between all peers for reliable delivery.</p>
+        </div>
+        <div class="feature-card">
+          <h4>Low Latency</h4>
+          <p>Direct peer connections for real-time features like the Pong game.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2><span class="tag tag-chat">CHAT</span> Lobby & Messaging</h2>
+      <ul>
+        <li>Click the <strong>chat bubble</strong> icon to open the lobby panel</li>
+        <li>See all connected users with their colors and roles</li>
+        <li>Send messages to the entire lobby or <strong>private message</strong> a specific user</li>
+        <li>Left-click a user in the list to set them as your private message target</li>
+        <li>Use the dropdown next to the input field to switch between lobby and private</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2><span class="tag tag-hub">HUB</span> Controls</h2>
+      <p style="margin-bottom: 20px">As the first visitor (Hub), you get special powers:</p>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <h4>Jump All</h4>
+          <p>Instantly navigate all viewers to your current slide. Great for guided presentations.</p>
+        </div>
+        <div class="feature-card">
+          <h4>Follow Mode</h4>
+          <p>Continuously sync your slide position to all viewers. They follow along as you present.</p>
+        </div>
+        <div class="feature-card">
+          <h4>Live Polls</h4>
+          <p>Create a question with configurable answers. Viewers get 10 seconds to vote, then see results.</p>
+        </div>
+        <div class="feature-card">
+          <h4>Hub Badge</h4>
+          <p>Your username displays with a [HUB] tag so everyone knows who's in charge.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Poll Feature</h2>
+      <p>The Hub can launch live polls with a 10-second countdown:</p>
+      <ol>
+        <li>Click the <strong>Hub icon</strong> (orange) in the toolbar</li>
+        <li>Select <strong>"Launch Poll"</strong></li>
+        <li>Enter your question and 2-8 answer options</li>
+        <li>Click <strong>"Publish Poll"</strong></li>
+        <li>All users see a vote modal with a progress bar countdown</li>
+        <li>After 10 seconds, results are displayed with bar charts</li>
+      </ol>
+      <p style="margin-top: 20px; color: rgba(255,255,255,0.5); font-size: 0.8em">
+        Try it now if you're the Hub!
+      </p>
+    </section>
+
+    <section>
+      <h2><span class="tag tag-game">GAME</span> Pong</h2>
+      <p>Right-click any user in the lobby panel and select <strong>"Challenge to Pong"</strong>:</p>
+      <ul>
+        <li>A semi-transparent overlay appears on both screens</li>
+        <li>Challenger plays on the <strong>left</strong>, opponent on the <strong>right</strong></li>
+        <li>Move your mouse (or finger) up and down to control the paddle</li>
+        <li>Ball speed increases with each paddle hit</li>
+        <li>Speed resets between rounds</li>
+        <li>First player to <strong>10 points</strong> wins</li>
+        <li>Press <strong>Esc</strong> to exit early</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2><span class="tag tag-hub">HUB</span> Arena &mdash; Top-Down Shooter</h2>
+      <p>The Hub can launch an arena game for <strong>all lobby members</strong>:</p>
+      <ul>
+        <li>Click the <strong>Hub icon</strong> then <strong>"Launch Arena"</strong></li>
+        <li>Everyone is dropped into a shared 2D map with walls</li>
+        <li>Each player is a <strong>colored circle</strong> with a direction indicator</li>
+        <li><strong>H/J/K/L</strong> to move left/down/up/right</li>
+        <li><strong>Mouse</strong> controls your aim direction</li>
+        <li><strong>Space</strong> fires a burst of bullets toward your cursor</li>
+        <li>Bullets stop when they hit a <strong>wall</strong>, <strong>player</strong>, or leave the screen</li>
+        <li>Hit once: circle becomes <strong>half-filled</strong>, but movement speed <strong>increases</strong></li>
+        <li>Hit twice: <strong>eliminated</strong></li>
+        <li>Last player standing wins!</li>
+      </ul>
+      <p style="margin-top: 15px; color: rgba(255,255,255,0.5); font-size: 0.8em">
+        Hub syncs timing and runs authoritative collision detection.
+      </p>
+    </section>
+
+    <section>
+      <h2>Settings</h2>
+      <p>Click the <strong>user icon</strong> in the toolbar to open settings:</p>
+      <ul>
+        <li><strong>Username</strong> — Customize your display name</li>
+        <li><strong>Custom Color</strong> — Choose a color for your name and messages</li>
+        <li><strong>Go Offline</strong> — Disconnect from the lobby temporarily</li>
+        <li><strong>Dark Mode</strong> — Force dark styling on the presentation</li>
+        <li><strong>High Contrast</strong> — Enhanced visibility for accessibility</li>
+      </ul>
+      <p style="margin-top: 15px; color: rgba(255,255,255,0.5); font-size: 0.8em">
+        All settings are persisted in localStorage across sessions.
+      </p>
+    </section>
+
+    <section>
+      <h2>Plugin Usage</h2>
+      <p>Add the plugin to any Reveal.js presentation:</p>
+      <pre><code class="language-html">&lt;script src="reveal-peerjs.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+  Reveal.initialize({
+    plugins: [RevealPeerJS]
+  });
+&lt;/script&gt;</code></pre>
+      <p style="margin-top: 20px">Or with ES modules:</p>
+      <pre><code class="language-js">import Reveal from 'reveal.js';
+import RevealPeerJS from 'reveal-peerjs';
+
+Reveal.initialize({
+  plugins: [RevealPeerJS]
+});</code></pre>
+    </section>
+
+    <section>
+      <h2>Architecture</h2>
+      <pre><code class="language-text">┌──────────────────────────────────┐
+│          Reveal.js Deck          │
+│                                  │
+│  ┌────────────────────────────┐  │
+│  │    RevealPeerJS Plugin     │  │
+│  │                            │  │
+│  │  ┌──────┐  ┌───────────┐  │  │
+│  │  │Toolbar│  │LobbyPanel │  │  │
+│  │  └──────┘  │ ├─Users   │  │  │
+│  │            │ └─Chat    │  │  │
+│  │  ┌──────┐  └───────────┘  │  │
+│  │  │Settings│ ┌──────────┐  │  │
+│  │  │ Modal │ │ HubMenu  │  │  │
+│  │  └──────┘ │ ├─JumpAll │  │  │
+│  │           │ ├─Follow  │  │  │
+│  │  ┌─────┐  │ ├─Polls   │  │  │
+│  │  │Pong │  │ └─Arena   │  │  │
+│  │  └─────┘  └──────────┘  │  │
+│  │  ┌───────┐               │  │
+│  │  │Arena  │               │  │
+│  │  │Shooter│               │  │
+│  │  └───────┘               │  │
+│  │  ┌──────────────────┐   │  │
+│  │  │  LobbyNetwork    │   │  │
+│  │  │  (PeerJS Star)   │   │  │
+│  │  └──────────────────┘   │  │
+│  └────────────────────────────┘  │
+└──────────────────────────────────┘</code></pre>
+    </section>
+
+    <section class="center">
+      <h1>Try It Out!</h1>
+      <p style="color: rgba(255,255,255,0.6)">
+        Open this page in another browser tab or window<br>
+        to see the lobby in action.
+      </p>
+      <p style="margin-top: 40px; font-size: 2em">&#9660;</p>
+      <p style="color: rgba(255,255,255,0.4); font-size: 0.8em">
+        Check the toolbar in the bottom-left corner
+      </p>
+    </section>
+
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="/dist/reveal-peerjs.js"></script>
+<script>
+  Reveal.initialize({
+    hash: true,
+    transition: 'slide',
+    plugins: [RevealPeerJS]
+  });
+</script>
+
+</body>
+</html>
