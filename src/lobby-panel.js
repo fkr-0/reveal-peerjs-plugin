@@ -62,6 +62,10 @@ export class LobbyPanel {
       this.hide();
     });
 
+    // Drag to reposition via header
+    const header = this.el.querySelector('.rpjs-lobby-header');
+    this._bindDragEvents(header);
+
     // Resize handle
     const resizeHandle = this.el.querySelector('#rpjs-resize-handle');
     if (resizeHandle) {
@@ -95,6 +99,78 @@ export class LobbyPanel {
 
     // Auto-focus input
     setTimeout(() => input.focus(), 100);
+  }
+
+  _bindDragEvents(handle) {
+    let isDragging = false;
+    let startX, startY, startLeft, startTop;
+
+    const onMouseDown = (e) => {
+      if (e.target.closest('button')) return;
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      const rect = this.el.getBoundingClientRect();
+      startLeft = rect.left;
+      startTop = rect.top;
+      // Switch from bottom/left positioning to top/left so drag works freely
+      this.el.style.bottom = 'auto';
+      this.el.style.top = startTop + 'px';
+      this.el.style.left = startLeft + 'px';
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+      e.preventDefault();
+    };
+
+    const onMouseMove = (e) => {
+      if (!isDragging) return;
+      let newLeft = startLeft + (e.clientX - startX);
+      let newTop = startTop + (e.clientY - startY);
+      newLeft = Math.max(0, Math.min(window.innerWidth - 60, newLeft));
+      newTop = Math.max(0, Math.min(window.innerHeight - 60, newTop));
+      this.el.style.left = newLeft + 'px';
+      this.el.style.top = newTop + 'px';
+    };
+
+    const onMouseUp = () => {
+      isDragging = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    handle.addEventListener('mousedown', onMouseDown);
+
+    // Touch drag
+    let touchId = null;
+    handle.addEventListener('touchstart', (e) => {
+      if (e.target.closest('button')) return;
+      const touch = e.changedTouches[0];
+      touchId = touch.identifier;
+      startX = touch.clientX;
+      startY = touch.clientY;
+      const rect = this.el.getBoundingClientRect();
+      startLeft = rect.left;
+      startTop = rect.top;
+      this.el.style.bottom = 'auto';
+      this.el.style.top = startTop + 'px';
+      this.el.style.left = startLeft + 'px';
+      e.preventDefault();
+    }, { passive: false });
+
+    handle.addEventListener('touchmove', (e) => {
+      for (const touch of e.changedTouches) {
+        if (touch.identifier !== touchId) continue;
+        let newLeft = startLeft + (touch.clientX - startX);
+        let newTop = startTop + (touch.clientY - startY);
+        newLeft = Math.max(0, Math.min(window.innerWidth - 60, newLeft));
+        newTop = Math.max(0, Math.min(window.innerHeight - 60, newTop));
+        this.el.style.left = newLeft + 'px';
+        this.el.style.top = newTop + 'px';
+      }
+      e.preventDefault();
+    }, { passive: false });
+
+    handle.addEventListener('touchend', () => { touchId = null; });
   }
 
   _bindResizeEvents(handle) {

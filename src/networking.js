@@ -751,13 +751,24 @@ export class LobbyNetwork {
    */
   getUserList() {
     const list = [];
+    let selfIncluded = false;
     for (const [id, user] of this.users) {
+      if (id === this.myId) selfIncluded = true;
       list.push({
         id: user.id,
         username: user.username,
         color: user.color,
         isHub: user.isHub,
         number: user.number,
+      });
+    }
+    if (!selfIncluded && this.myUser) {
+      list.push({
+        id: this.myUser.id,
+        username: this.myUser.username,
+        color: this.myUser.color,
+        isHub: this.myUser.isHub,
+        number: this.myUser.number,
       });
     }
     return list.sort((a, b) => {

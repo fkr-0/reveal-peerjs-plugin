@@ -123,6 +123,12 @@ export function injectStyles() {
       font-weight: 600;
       font-size: 13px;
       color: rgba(255, 255, 255, 0.9);
+      cursor: grab;
+      user-select: none;
+    }
+
+    .rpjs-lobby-header:active {
+      cursor: grabbing;
     }
 
     .rpjs-lobby-close {
@@ -212,8 +218,7 @@ export function injectStyles() {
     /* Chat area */
     .rpjs-chat-section {
       flex: 1;
-      min-height: 120px;
-      max-height: 220px;
+      min-height: 0;
       overflow-y: auto;
       padding: 6px 10px;
       display: flex;
@@ -858,6 +863,7 @@ export function injectStyles() {
       background: rgba(0, 0, 0, 0.5);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       cursor: none;
+      touch-action: none;
     }
 
     .rpjs-pong-canvas {
@@ -1042,6 +1048,7 @@ export function injectStyles() {
       background: rgba(10, 10, 18, 0.88);
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       cursor: crosshair;
+      touch-action: none;
     }
 
     .rpjs-arena-canvas {
@@ -1139,6 +1146,74 @@ export function injectStyles() {
 
     .rpjs-arena-scoreboard-hp.alive {
       color: #4caf50;
+    }
+
+    /* Arena touch controls (mobile) */
+    .rpjs-arena-touch-controls {
+      display: none;
+    }
+
+    @media (pointer: coarse), (hover: none) {
+      .rpjs-arena-touch-controls {
+        display: block;
+      }
+      .rpjs-arena-controls {
+        display: none;
+      }
+    }
+
+    .rpjs-arena-joystick {
+      position: absolute;
+      bottom: 30px;
+      left: 30px;
+      width: 130px;
+      height: 130px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.06);
+      border: 2px solid rgba(255, 255, 255, 0.15);
+      z-index: 10002;
+    }
+
+    .rpjs-arena-joystick-knob {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      pointer-events: none;
+      transition: none;
+    }
+
+    .rpjs-arena-shoot-btn {
+      position: absolute;
+      bottom: 30px;
+      right: 30px;
+      width: 90px;
+      height: 90px;
+      border-radius: 50%;
+      background: rgba(244, 67, 54, 0.25);
+      border: 2px solid rgba(244, 67, 54, 0.5);
+      color: rgba(255, 255, 255, 0.8);
+      font-size: 13px;
+      font-weight: 700;
+      font-family: inherit;
+      letter-spacing: 1px;
+      z-index: 10002;
+      cursor: pointer;
+    }
+
+    .rpjs-arena-shoot-btn:active {
+      background: rgba(244, 67, 54, 0.5);
+    }
+
+    /* Pong touch controls */
+    .rpjs-pong-exit {
+      min-width: 44px;
+      min-height: 44px;
     }
   `;
 

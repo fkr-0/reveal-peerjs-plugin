@@ -147,6 +147,7 @@ export class PongGame {
       const normalizedY = this.mouseY / this.H;
       this.network.sendPongMove(this.opponentPeerId, Math.max(0, Math.min(1, normalizedY)));
     };
+    this.el.addEventListener('touchstart', this._touchHandler, { passive: false });
     this.el.addEventListener('touchmove', this._touchHandler, { passive: false });
 
     // Exit

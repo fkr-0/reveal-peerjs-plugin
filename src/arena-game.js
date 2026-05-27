@@ -28,8 +28,12 @@ const BOOST_SPEED = 5;
 const BULLET_SPEED = 8;
 const BULLET_LENGTH = 8;
 const SHOOT_COOLDOWN = 300; // ms
-const BULLET_COUNT = 5; // bullets per burst
-const BULLET_SPREAD = 0.15; // radians spread
+const BULLET_COUNT_CLOSE = 8;
+const BULLET_COUNT_FAR = 2;
+const SPREAD_CLOSE = 0.12; // per-bullet radians when close (wide shotgun)
+const SPREAD_FAR = 0.02;   // per-bullet radians when far (tight sniper)
+const SPREAD_MIN_DIST = 40;
+const SPREAD_MAX_DIST = 350;
 const WALL_COUNT = 18;
 const WALL_MIN_LEN = 40;
 const WALL_MAX_LEN = 140;
@@ -130,6 +134,14 @@ export class ArenaGame {
     this.mouseX = 0;
     this.mouseY = 0;
     this.lastShootTime = 0;
+
+    // Touch input
+    this.touchDx = 0;
+    this.touchDy = 0;
+    this._joystickTouchId = null;
+    this._joystickCenter = null;
+    this._shootTouchInterval = null;
+    this._isTouchDevice = false;
 
     // Hub authoritative state
     this._stateBroadcastInterval = null;
@@ -252,7 +264,13 @@ export class ArenaGame {
         <span id="rpjs-arena-player-count"></span>
       </div>
       <button class="rpjs-arena-exit" id="rpjs-arena-exit">Exit [Esc]</button>
-      <div class="rpjs-arena-controls">WASD / HJKL to move &middot; Mouse to aim &middot; Space to shoot</div>
+      <div class="rpjs-arena-controls">WASD / HJKL to move &middot; Mouse to aim &middot; Click / Space to shoot</div>
+      <div class="rpjs-arena-touch-controls">
+        <div class="rpjs-arena-joystick" id="rpjs-arena-joystick">
+          <div class="rpjs-arena-joystick-knob" id="rpjs-arena-joystick-knob"></div>
+        </div>
+        <button class="rpjs-arena-shoot-btn" id="rpjs-arena-shoot-btn">FIRE</button>
+      </div>
       <div class="rpjs-arena-scoreboard" id="rpjs-arena-scoreboard"></div>
     `;
 
@@ -305,12 +323,105 @@ export class ArenaGame {
 
     document.addEventListener('keydown', this._keyDownHandler, true);
     document.addEventListener('keyup', this._keyUpHandler, true);
+    this._mouseDownHandler = (e) => {
+      if (e.button === 0 && this.running) {
+        this._shoot();
+      }
+    };
+
     this.el.addEventListener('mousemove', this._mouseMoveHandler);
+    this.canvas.addEventListener('mousedown', this._mouseDownHandler);
     window.addEventListener('resize', this._resizeHandler);
 
     this.el.querySelector('#rpjs-arena-exit').addEventListener('click', () => {
       this.stop();
     });
+
+    this._bindTouchEvents();
+  }
+
+  _bindTouchEvents() {
+    this._isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    if (!this._isTouchDevice) return;
+
+    const joystick = this.el.querySelector('#rpjs-arena-joystick');
+    const knob = this.el.querySelector('#rpjs-arena-joystick-knob');
+    const shootBtn = this.el.querySelector('#rpjs-arena-shoot-btn');
+    const RADIUS = 55;
+
+    // --- Joystick ---
+    const joyStart = (e) => {
+      e.preventDefault();
+      const touch = e.changedTouches[0];
+      this._joystickTouchId = touch.identifier;
+      const rect = joystick.getBoundingClientRect();
+      this._joystickCenter = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    };
+
+    const joyMove = (e) => {
+      e.preventDefault();
+      for (const touch of e.changedTouches) {
+        if (touch.identifier !== this._joystickTouchId) continue;
+        const dx = touch.clientX - this._joystickCenter.x;
+        const dy = touch.clientY - this._joystickCenter.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d > 8) {
+          const clamped = Math.min(d, RADIUS);
+          this.touchDx = dx / d;
+          this.touchDy = dy / d;
+          knob.style.transform = `translate(calc(-50% + ${(dx / d) * clamped}px), calc(-50% + ${(dy / d) * clamped}px))`;
+        } else {
+          this.touchDx = 0;
+          this.touchDy = 0;
+          knob.style.transform = 'translate(-50%, -50%)';
+        }
+      }
+    };
+
+    const joyEnd = (e) => {
+      for (const touch of e.changedTouches) {
+        if (touch.identifier !== this._joystickTouchId) continue;
+        this._joystickTouchId = null;
+        this.touchDx = 0;
+        this.touchDy = 0;
+        knob.style.transform = 'translate(-50%, -50%)';
+      }
+    };
+
+    joystick.addEventListener('touchstart', joyStart, { passive: false });
+    joystick.addEventListener('touchmove', joyMove, { passive: false });
+    joystick.addEventListener('touchend', joyEnd);
+    joystick.addEventListener('touchcancel', joyEnd);
+
+    // --- Shoot button (auto-fire while held) ---
+    shootBtn.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      this._shoot();
+      this._shootTouchInterval = setInterval(() => this._shoot(), SHOOT_COOLDOWN + 50);
+    }, { passive: false });
+
+    const stopShoot = () => {
+      if (this._shootTouchInterval) { clearInterval(this._shootTouchInterval); this._shootTouchInterval = null; }
+    };
+    shootBtn.addEventListener('touchend', stopShoot);
+    shootBtn.addEventListener('touchcancel', stopShoot);
+
+    // --- Aim: touch on canvas (any touch not on joystick/button) ---
+    this._canvasTouchHandler = (e) => {
+      e.preventDefault();
+      for (const touch of e.touches) {
+        if (touch.identifier === this._joystickTouchId) continue;
+        const el = document.elementFromPoint(touch.clientX, touch.clientY);
+        if (el && (el === shootBtn || joystick.contains(el))) continue;
+        this.mouseX = touch.clientX;
+        this.mouseY = touch.clientY;
+        const me = this.players.get(this.network.myId);
+        if (me) me.angle = Math.atan2(touch.clientY - me.y, touch.clientX - me.x);
+        break;
+      }
+    };
+    this.canvas.addEventListener('touchstart', this._canvasTouchHandler, { passive: false });
+    this.canvas.addEventListener('touchmove', this._canvasTouchHandler, { passive: false });
   }
 
   _unbindEvents() {
@@ -337,13 +448,16 @@ export class ArenaGame {
     if (this.keysDown.has('l') || this.keysDown.has('d')) dx += 1;
     if (this.keysDown.has('k') || this.keysDown.has('w')) dy -= 1;
     if (this.keysDown.has('j') || this.keysDown.has('s')) dy += 1;
+    dx += this.touchDx;
+    dy += this.touchDy;
 
     if (dx === 0 && dy === 0) return;
 
     const speed = me.hitCount > 0 ? BOOST_SPEED : BASE_SPEED;
     const len = Math.sqrt(dx * dx + dy * dy);
-    dx = (dx / len) * speed;
-    dy = (dy / len) * speed;
+    const norm = len > 1 ? len : 1;
+    dx = (dx / norm) * speed;
+    dy = (dy / norm) * speed;
 
     me.x = clamp(me.x + dx, PLAYER_RADIUS, this.W - PLAYER_RADIUS);
     me.y = clamp(me.y + dy, PLAYER_RADIUS, this.H - PLAYER_RADIUS);
@@ -366,23 +480,30 @@ export class ArenaGame {
     if (now - this.lastShootTime < SHOOT_COOLDOWN) return;
     this.lastShootTime = now;
 
+    const d = dist(me.x, me.y, this.mouseX, this.mouseY);
+    const t = clamp((d - SPREAD_MIN_DIST) / (SPREAD_MAX_DIST - SPREAD_MIN_DIST), 0, 1);
+    const count = Math.round(BULLET_COUNT_CLOSE + (BULLET_COUNT_FAR - BULLET_COUNT_CLOSE) * t);
+    const spread = SPREAD_CLOSE + (SPREAD_FAR - SPREAD_CLOSE) * t;
+
     const shootData = {
       x: me.x,
       y: me.y,
       angle: me.angle,
       color: me.color,
+      count,
+      spread,
     };
 
-    // Create bullets locally
     this._createBullets(this.network.myId, shootData);
-
-    // Send to hub/peers
     this.network.sendArenaShoot(shootData);
   }
 
   _createBullets(fromId, data) {
-    for (let i = 0; i < BULLET_COUNT; i++) {
-      const spreadAngle = data.angle + (i - (BULLET_COUNT - 1) / 2) * BULLET_SPREAD;
+    const count = data.count || BULLET_COUNT_CLOSE;
+    const spread = data.spread != null ? data.spread : SPREAD_CLOSE;
+
+    for (let i = 0; i < count; i++) {
+      const spreadAngle = data.angle + (i - (count - 1) / 2) * spread;
       this.bullets.push({
         x: data.x + Math.cos(data.angle) * (PLAYER_RADIUS + 4),
         y: data.y + Math.sin(data.angle) * (PLAYER_RADIUS + 4),
@@ -390,7 +511,7 @@ export class ArenaGame {
         vy: Math.sin(spreadAngle) * BULLET_SPEED,
         from: fromId,
         color: data.color,
-        life: 120, // frames
+        life: 120,
       });
     }
   }
@@ -527,12 +648,15 @@ export class ArenaGame {
       if (this.keysDown.has('l') || this.keysDown.has('d')) dx += 1;
       if (this.keysDown.has('k') || this.keysDown.has('w')) dy -= 1;
       if (this.keysDown.has('j') || this.keysDown.has('s')) dy += 1;
+      dx += this.touchDx;
+      dy += this.touchDy;
 
       if (dx !== 0 || dy !== 0) {
         const speed = me.hitCount > 0 ? BOOST_SPEED : BASE_SPEED;
         const len = Math.sqrt(dx * dx + dy * dy);
-        me.x = clamp(me.x + (dx / len) * speed, PLAYER_RADIUS, this.W - PLAYER_RADIUS);
-        me.y = clamp(me.y + (dy / len) * speed, PLAYER_RADIUS, this.H - PLAYER_RADIUS);
+        const norm = len > 1 ? len : 1;
+        me.x = clamp(me.x + (dx / norm) * speed, PLAYER_RADIUS, this.W - PLAYER_RADIUS);
+        me.y = clamp(me.y + (dy / norm) * speed, PLAYER_RADIUS, this.H - PLAYER_RADIUS);
         this._resolveWalls(me);
       }
       me.angle = Math.atan2(this.mouseY - me.y, this.mouseX - me.x);
@@ -909,6 +1033,10 @@ export class ArenaGame {
     if (this._inputSendInterval) {
       clearInterval(this._inputSendInterval);
       this._inputSendInterval = null;
+    }
+    if (this._shootTouchInterval) {
+      clearInterval(this._shootTouchInterval);
+      this._shootTouchInterval = null;
     }
     this._unbindEvents();
     if (this.el) {
