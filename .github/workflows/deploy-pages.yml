@@ -44,7 +44,6 @@ jobs:
           cp -R docs/* site/
           cp -R example site/example
           cp -R dist site/dist
-          cp CNAME site/CNAME
           touch site/.nojekyll
 
       - name: Upload pages artifact
