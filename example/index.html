@@ -42,6 +42,18 @@
     .tag-chat { background: rgba(79,195,247,0.3); color: #4fc3f7; }
     .tag-game { background: rgba(76,175,80,0.3); color: #66bb6a; }
     pre { font-size: 0.55em; }
+    .fit-screen h2 { font-size: 1.6em; margin-bottom: 0.3em; }
+    .fit-screen p { font-size: 0.85em; line-height: 1.3; margin-bottom: 0.6em; }
+    .fit-screen .feature-grid { gap: 12px; margin-top: 16px; }
+    .fit-screen .feature-card { padding: 14px; }
+    .fit-screen .feature-card h4 { font-size: 0.95em; margin-bottom: 4px; }
+    .fit-screen .feature-card p { font-size: 0.72em; line-height: 1.25; margin: 0; }
+    @media (max-width: 900px) {
+      .feature-grid { grid-template-columns: 1fr; }
+      .fit-screen h2 { font-size: 1.3em; }
+      .fit-screen p { font-size: 0.72em; }
+      .fit-screen .feature-card p { font-size: 0.68em; }
+    }
   </style>
 </head>
 <body>
@@ -61,7 +73,7 @@
       </p>
     </section>
 
-    <section>
+    <section class="fit-screen">
       <h2>How It Works</h2>
       <p>The first visitor to open this presentation becomes the <span class="tag tag-hub">HUB</span>.<br>
       All subsequent visitors connect as participants in a shared lobby.</p>
@@ -250,7 +262,7 @@ Reveal.initialize({
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
-<script src="/dist/reveal-peerjs.js"></script>
+<script src="../dist/reveal-peerjs.js"></script>
 <script>
   Reveal.initialize({
     hash: true,

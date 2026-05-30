@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RevealPeerJS Docs</title>
+  <style>
+    :root {
+      --bg: #0f1420;
+      --panel: #182033;
+      --text: #e8eefc;
+      --muted: #a8b3cf;
+      --accent: #61dafb;
+      --border: #2a3654;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+      background: radial-gradient(circle at top right, #1c2741 0%, var(--bg) 55%);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    main {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 2rem 1rem 4rem;
+    }
+    h1, h2 { line-height: 1.2; }
+    h1 { margin: 0 0 0.5rem; }
+    .muted { color: var(--muted); }
+    .panel {
+      background: color-mix(in srgb, var(--panel) 92%, transparent);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem;
+      margin: 1rem 0;
+    }
+    a { color: var(--accent); }
+    pre {
+      overflow-x: auto;
+      background: #0c1220;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.8rem;
+      font-size: 0.92rem;
+    }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>RevealPeerJS Docs</h1>
+    <p class="muted">Enhanced quickstart, usage snippets, and showcase links.</p>
+
+    <section class="panel">
+      <h2>README</h2>
+      <p>Project overview and full reference: <a href="../README.md">README.md</a></p>
+    </section>
+
+    <section class="panel">
+      <h2>Usage</h2>
+      <p>Install:</p>
+      <pre><code>pnpm add reveal-peerjs</code></pre>
+      <p>ESM setup:</p>
+      <pre><code>import Reveal from 'reveal.js';
+import RevealPeerJS from 'reveal-peerjs';
+
+Reveal.initialize({
+  hash: true,
+  plugins: [RevealPeerJS]
+});</code></pre>
+      <p>Script include:</p>
+      <pre><code>&lt;script src="https://cdn.jsdelivr.net/npm/reveal-peerjs@latest/dist/reveal-peerjs.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+  Reveal.initialize({ plugins: [RevealPeerJS] });
+&lt;/script&gt;</code></pre>
+    </section>
+
+    <section class="panel">
+      <h2>Example / Showcase</h2>
+      <p>
+        Open the full interactive showcase deck:
+        <a href="../example/">example/index.html</a>
+      </p>
+      <p class="muted">
+        Tip: open it in two windows to test chat, hub controls, polls, and games.
+      </p>
+    </section>
+  </main>
+</body>
+</html>

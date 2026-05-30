@@ -7,6 +7,8 @@
 
 Transform any Reveal.js slideshow into an interactive, collaborative experience. RevealPeerJS connects all viewers through a shared lobby where they can chat, respond to polls, and play games—all without a backend server.
 
+Documentation + showcase page: `https://reveal-peerjs.fkr.dev/`
+
 ## ✨ Features
 
 ### 🎛️ Lobby & Chat
