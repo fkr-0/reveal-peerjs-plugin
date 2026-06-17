@@ -52,6 +52,20 @@ export function injectStyles() {
       transform: scale(1.08);
     }
 
+    .rpjs-toolbar button:focus-visible,
+    .rpjs-send-btn:focus-visible,
+    .rpjs-target-btn:focus-visible,
+    .rpjs-lobby-close:focus-visible,
+    .rpjs-modal-close:focus-visible,
+    .rpjs-save-btn:focus-visible,
+    .rpjs-hub-menu-item:focus-visible,
+    .rpjs-poll-vote-option:focus-visible,
+    .rpjs-arena-exit:focus-visible,
+    .rpjs-arena-shoot-btn:focus-visible {
+      outline: 2px solid rgba(97, 218, 251, 0.95);
+      outline-offset: 2px;
+    }
+
     .rpjs-toolbar button.rpjs-active {
       background: rgba(79, 195, 247, 0.6);
       color: #fff;
@@ -611,6 +625,11 @@ export function injectStyles() {
       transition: background 0.15s;
       font-size: 13px;
       color: rgba(255, 255, 255, 0.8);
+      border: none;
+      background: transparent;
+      width: 100%;
+      text-align: left;
+      font-family: inherit;
     }
 
     .rpjs-hub-menu-item:hover {
@@ -734,6 +753,56 @@ export function injectStyles() {
       color: rgba(255, 255, 255, 0.7);
     }
 
+    .rpjs-poll-options-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin: 12px 0;
+      padding: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .rpjs-poll-option-field {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.72);
+    }
+
+    .rpjs-poll-select {
+      min-width: 130px;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 6px;
+      color: #f4f4f4;
+      padding: 6px 8px;
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+    }
+
+    .rpjs-poll-select:focus {
+      border-color: rgba(255, 167, 38, 0.45);
+    }
+
+    .rpjs-poll-check-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.72);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .rpjs-poll-check-option input {
+      accent-color: #ffa726;
+    }
+
     .rpjs-poll-publish-btn {
       width: 100%;
       padding: 10px;
@@ -777,11 +846,26 @@ export function injectStyles() {
       animation: rpjs-scale-in 0.2s ease;
     }
 
+    .rpjs-poll-vote-meta {
+      font-size: 11px;
+      letter-spacing: 0.02em;
+      color: rgba(255, 255, 255, 0.48);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+
     .rpjs-poll-vote-question {
       font-size: 16px;
       font-weight: 600;
-      margin-bottom: 16px;
+      margin-bottom: 10px;
       color: #fff;
+      line-height: 1.35;
+    }
+
+    .rpjs-poll-vote-hint {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.58);
+      margin-bottom: 12px;
     }
 
     .rpjs-poll-vote-options {
@@ -792,6 +876,9 @@ export function injectStyles() {
     }
 
     .rpjs-poll-vote-option {
+      display: flex;
+      align-items: center;
+      gap: 10px;
       padding: 10px 14px;
       background: rgba(255, 255, 255, 0.06);
       border: 1px solid rgba(255, 255, 255, 0.1);
@@ -804,9 +891,36 @@ export function injectStyles() {
       font-family: inherit;
     }
 
-    .rpjs-poll-vote-option:hover {
+    .rpjs-poll-vote-option:hover,
+    .rpjs-poll-vote-option.rpjs-selected {
       background: rgba(255, 167, 38, 0.15);
-      border-color: rgba(255, 167, 38, 0.3);
+      border-color: rgba(255, 167, 38, 0.35);
+    }
+
+    .rpjs-poll-vote-option-marker {
+      width: 18px;
+      flex: 0 0 18px;
+      color: #ffa726;
+      text-align: center;
+    }
+
+    .rpjs-poll-submit-vote {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 14px;
+      background: rgba(255, 167, 38, 0.55);
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    .rpjs-poll-submit-vote:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
     }
 
     .rpjs-poll-timer-bar {
@@ -826,32 +940,95 @@ export function injectStyles() {
 
     /* Poll results */
     .rpjs-poll-results-card {
-      width: 380px;
+      width: 430px;
+      max-width: 92vw;
+    }
+
+    .rpjs-poll-results-question {
+      margin-bottom: 6px;
+      font-size: 15px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.9);
+      line-height: 1.35;
+    }
+
+    .rpjs-poll-results-summary {
+      margin-bottom: 14px;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.48);
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    .rpjs-poll-results-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
     }
 
     .rpjs-poll-result-row {
-      margin-bottom: 12px;
+      padding: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.035);
     }
 
-    .rpjs-poll-result-label {
-      display: flex;
-      justify-content: space-between;
+    .rpjs-poll-result-row[data-leading="true"] {
+      border-color: rgba(255, 167, 38, 0.34);
+      background: rgba(255, 167, 38, 0.08);
+    }
+
+    .rpjs-poll-result-heading {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 8px;
+      align-items: center;
       font-size: 13px;
       margin-bottom: 4px;
     }
 
+    .rpjs-poll-result-rank {
+      color: #ffa726;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .rpjs-poll-result-text {
+      color: rgba(255, 255, 255, 0.9);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .rpjs-poll-result-winner {
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: rgba(255, 167, 38, 0.2);
+      color: #ffcc80;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .rpjs-poll-result-meta {
+      margin-bottom: 6px;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.5);
+    }
+
     .rpjs-poll-result-bar-bg {
       width: 100%;
-      height: 8px;
-      background: rgba(255, 255, 255, 0.06);
-      border-radius: 4px;
+      height: 9px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
       overflow: hidden;
     }
 
     .rpjs-poll-result-bar-fill {
       height: 100%;
       background: linear-gradient(90deg, #ffa726, #ff7043);
-      border-radius: 4px;
+      border-radius: 999px;
       transition: width 0.5s ease;
     }
 
@@ -1070,6 +1247,10 @@ export function injectStyles() {
       font-weight: 600;
       text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
       pointer-events: none;
+      background: rgba(4, 7, 12, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 999px;
+      padding: 6px 12px;
     }
 
     .rpjs-arena-hud-title {
@@ -1113,14 +1294,15 @@ export function injectStyles() {
       position: absolute;
       top: 44px;
       right: 16px;
-      background: rgba(0, 0, 0, 0.5);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(4, 8, 14, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.16);
       border-radius: 8px;
       padding: 8px 12px;
       font-size: 11px;
-      color: rgba(255, 255, 255, 0.7);
+      color: rgba(255, 255, 255, 0.86);
       pointer-events: none;
       min-width: 140px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.34);
     }
 
     .rpjs-arena-scoreboard-row {
@@ -1146,6 +1328,11 @@ export function injectStyles() {
 
     .rpjs-arena-scoreboard-hp.alive {
       color: #4caf50;
+    }
+
+    .rpjs-arena-scoreboard-hp {
+      letter-spacing: 0.2px;
+      font-variant-numeric: tabular-nums;
     }
 
     /* Arena touch controls (mobile) */

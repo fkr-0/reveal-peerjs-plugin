@@ -41,6 +41,8 @@ export class LobbyNetwork {
     this.listeners = new Map(); // event -> [callbacks]
     this._visitorCounter = 0;
     this._destroyed = false;
+    this._hubSyncSeq = 0;
+    this._lastHubSyncSeqByType = new Map();
   }
 
   on(event, callback) {
@@ -339,22 +341,27 @@ export class LobbyNetwork {
       }
 
       case MSG.PONG_MOVE:
+      case MSG.PONG_STATE:
       case MSG.PONG_ACCEPT:
-      case MSG.PONG_DECLINE: {
-        // Forward pong messages to target peer
-        if (msg.payload && msg.payload.to) {
-          this._sendToPeer(msg.payload.to, msg);
+      case MSG.PONG_DECLINE:
+      case MSG.PONG_SCORE:
+      case MSG.PONG_END: {
+        // Hub is the single relay for pong traffic. Stamp forwarded messages so
+        // receivers can discard stale state and clients cannot spoof sender IDs.
+        const payload = { ...msg.payload, from: fromConn.peer };
+        if (payload.to) {
+          this._sendToPeer(payload.to, this._createHubMessage(msg.type, payload));
         }
-        this._emit(msg.type, msg.payload);
+        this._emit(msg.type, payload);
         break;
       }
 
       case MSG.ARENA_INPUT:
       case MSG.ARENA_SHOOT: {
-        // Arena input/shoot from visitor → broadcast to all (including hub processing)
+        // Inputs are commands for the authoritative hub simulation only.
+        // Rebroadcasting commands lets visitors run partial remote simulations
+        // and causes divergence from the hub state stream.
         this._emit(msg.type, { ...msg.payload, from: fromConn.peer });
-        // Also relay to all other visitors
-        this._broadcastFromHub(createMessage(msg.type, { ...msg.payload, from: fromConn.peer }), fromConn.peer);
         break;
       }
 
@@ -463,17 +470,26 @@ export class LobbyNetwork {
       case MSG.PONG_STATE:
       case MSG.PONG_SCORE:
       case MSG.PONG_END: {
-        this._emit(msg.type, msg.payload);
+        if (this._shouldAcceptHubSyncedMessage(msg)) {
+          this._emit(msg.type, msg.payload);
+        }
         break;
       }
 
       case MSG.ARENA_START:
       case MSG.ARENA_STATE:
-      case MSG.ARENA_INPUT:
-      case MSG.ARENA_SHOOT:
       case MSG.ARENA_HIT:
       case MSG.ARENA_END: {
-        this._emit(msg.type, msg.payload);
+        if (this._shouldAcceptHubSyncedMessage(msg)) {
+          this._emit(msg.type, msg.payload);
+        }
+        break;
+      }
+
+      case MSG.ARENA_INPUT:
+      case MSG.ARENA_SHOOT: {
+        // Visitors never consume command messages; the hub consumes commands and
+        // publishes authoritative state snapshots instead.
         break;
       }
 
@@ -509,6 +525,30 @@ export class LobbyNetwork {
         console.warn('[RevealPeerJS] Failed to send to', peerId, e);
       }
     }
+  }
+
+
+  _createHubMessage(type, payload = {}) {
+    return createMessage(type, {
+      ...payload,
+      hubSync: {
+        hubId: this.myId,
+        seq: ++this._hubSyncSeq,
+      },
+    });
+  }
+
+  _shouldAcceptHubSyncedMessage(msg) {
+    const hubSync = msg?.payload?.hubSync;
+    if (!hubSync || typeof hubSync.seq !== 'number') return true;
+
+    const hubId = hubSync.hubId || 'unknown-hub';
+    const key = `${msg.type}:${hubId}`;
+    const lastSeq = this._lastHubSyncSeqByType.get(key) || 0;
+    if (hubSync.seq <= lastSeq) return false;
+
+    this._lastHubSyncSeqByType.set(key, hubSync.seq);
+    return true;
   }
 
   /**
@@ -666,16 +706,33 @@ export class LobbyNetwork {
    * Public: Send pong move
    */
   sendPongMove(targetPeerId, y) {
-    const msg = createMessage(MSG.PONG_MOVE, {
+    const payload = {
       from: this.myId,
       to: targetPeerId,
       y,
-    });
+    };
 
     if (this.isHub) {
-      this._sendToPeer(targetPeerId, msg);
+      this._sendToPeer(targetPeerId, this._createHubMessage(MSG.PONG_MOVE, payload));
     } else {
-      this._sendToPeer(this.lobbyId, msg);
+      this._sendToPeer(this.lobbyId, createMessage(MSG.PONG_MOVE, payload));
+    }
+  }
+
+  /**
+   * Public: Send authoritative pong state through the hub relay
+   */
+  sendPongState(targetPeerId, state) {
+    const payload = {
+      from: this.myId,
+      to: targetPeerId,
+      state,
+    };
+
+    if (this.isHub) {
+      this._sendToPeer(targetPeerId, this._createHubMessage(MSG.PONG_STATE, payload));
+    } else {
+      this._sendToPeer(this.lobbyId, createMessage(MSG.PONG_STATE, payload));
     }
   }
 
@@ -684,8 +741,9 @@ export class LobbyNetwork {
    */
   startArena(gameConfig) {
     if (!this.isHub) return;
-    this._broadcastFromHub(createMessage(MSG.ARENA_START, gameConfig));
-    this._emit('arena-start', gameConfig);
+    const msg = this._createHubMessage(MSG.ARENA_START, gameConfig);
+    this._broadcastFromHub(msg);
+    this._emit('arena-start', msg.payload);
   }
 
   /**
@@ -693,9 +751,10 @@ export class LobbyNetwork {
    */
   broadcastArenaState(state) {
     if (!this.isHub) return;
-    this._broadcastFromHub(createMessage(MSG.ARENA_STATE, state));
+    const msg = this._createHubMessage(MSG.ARENA_STATE, state);
+    this._broadcastFromHub(msg);
     // Also emit locally for hub's own game
-    this._emit('arena-state', state);
+    this._emit('arena-state', msg.payload);
   }
 
   /**
@@ -733,8 +792,9 @@ export class LobbyNetwork {
    */
   broadcastArenaHit(hit) {
     if (!this.isHub) return;
-    this._broadcastFromHub(createMessage(MSG.ARENA_HIT, hit));
-    this._emit('arena-hit', hit);
+    const msg = this._createHubMessage(MSG.ARENA_HIT, hit);
+    this._broadcastFromHub(msg);
+    this._emit('arena-hit', msg.payload);
   }
 
   /**
@@ -742,8 +802,9 @@ export class LobbyNetwork {
    */
   broadcastArenaEnd(results) {
     if (!this.isHub) return;
-    this._broadcastFromHub(createMessage(MSG.ARENA_END, results));
-    this._emit('arena-end', results);
+    const msg = this._createHubMessage(MSG.ARENA_END, results);
+    this._broadcastFromHub(msg);
+    this._emit('arena-end', msg.payload);
   }
 
   /**

@@ -202,20 +202,16 @@ test.describe('Settings Modal', () => {
     const modal = page.locator('.rpjs-modal');
     await expect(modal).toBeVisible();
 
-    // Find dark mode toggle
-    const darkModeToggle = modal.locator('.rpjs-toggle').filter({ hasText: /dark/i });
+    // Find dark mode toggle by its accessible switch name.
+    const darkModeToggle = modal.getByRole('switch', { name: /dark mode/i });
     await darkModeToggle.click();
 
     // Save settings
     const saveBtn = modal.locator('.rpjs-save-btn');
     await saveBtn.click();
 
-    await page.waitForTimeout(500);
-
     // Body should have dark mode class
-    const body = page.locator('body');
-    const hasClass = await body.getAttribute('class');
-    expect(hasClass).toContain('rpjs-dark-mode');
+    await expect(page.locator('body')).toHaveClass(/rpjs-dark-mode/);
   });
 });
 
@@ -250,16 +246,15 @@ test.describe('Keyboard Navigation', () => {
     await page.goto('/example/');
     await page.waitForTimeout(1000);
 
-    // Focus on body
-    await page.keyboard.press('Tab');
+    const chatBtn = page.getByRole('button', { name: /lobby/i });
+    const settingsBtn = page.getByRole('button', { name: /settings/i });
 
-    // Should focus on chat button
-    const chatBtn = page.locator('#rpjs-btn-lobby');
+    // Start at the first toolbar button; whole-page first-tab order is owned by Reveal.js.
+    await chatBtn.focus();
     await expect(chatBtn).toBeFocused();
 
     // Tab to settings button
     await page.keyboard.press('Tab');
-    const settingsBtn = page.locator('#rpjs-btn-settings');
     await expect(settingsBtn).toBeFocused();
   });
 
@@ -276,7 +271,6 @@ test.describe('Keyboard Navigation', () => {
 
     // Press Escape
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(200);
 
     // Modal should close
     await expect(overlay).not.toBeVisible();

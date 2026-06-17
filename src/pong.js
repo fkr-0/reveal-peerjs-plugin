@@ -41,6 +41,7 @@ export class PongGame {
     this.hitCount = 0;
 
     this._onPongMove = null;
+    this._onPongState = null;
     this._onPongAccept = null;
     this._onPongDecline = null;
   }
@@ -83,6 +84,13 @@ export class PongGame {
       }
     };
     this.network.on('pong-move', this._onPongMove);
+
+    this._onPongState = (payload) => {
+      if (payload.from !== this.opponentPeerId) return;
+      if (payload.to && payload.to !== this.network.myId) return;
+      this._applyState(payload.state);
+    };
+    this.network.on('pong-state', this._onPongState);
   }
 
   _updatePlayerNames() {
@@ -182,6 +190,9 @@ export class PongGame {
     if (this._onPongMove) {
       this.network.off('pong-move', this._onPongMove);
     }
+    if (this._onPongState) {
+      this.network.off('pong-state', this._onPongState);
+    }
     document.removeEventListener('keydown', this._keyHandler, true);
     window.removeEventListener('resize', this._resizeHandler);
     if (this.el) {
@@ -199,6 +210,10 @@ export class PongGame {
   }
 
   _update() {
+    // The initiator is the Pong authority. Followers render the latest
+    // hub-relayed state snapshot and send only paddle movement commands.
+    if (!this.isInitiator) return;
+
     // Move ball
     this.ball.x += this.ball.vx;
     this.ball.y += this.ball.vy;
@@ -251,6 +266,37 @@ export class PongGame {
         this._resetBall();
       }
     }
+
+    this._sendState();
+  }
+
+  _captureState() {
+    return {
+      ball: { ...this.ball },
+      leftY: this.leftY,
+      rightY: this.rightY,
+      scoreLeft: this.scoreLeft,
+      scoreRight: this.scoreRight,
+      currentSpeed: this.currentSpeed,
+      hitCount: this.hitCount,
+    };
+  }
+
+  _applyState(state) {
+    if (!state) return;
+    if (state.ball) this.ball = { ...state.ball };
+    if (typeof state.leftY === 'number') this.leftY = state.leftY;
+    if (typeof state.rightY === 'number') this.rightY = state.rightY;
+    if (typeof state.scoreLeft === 'number') this.scoreLeft = state.scoreLeft;
+    if (typeof state.scoreRight === 'number') this.scoreRight = state.scoreRight;
+    if (typeof state.currentSpeed === 'number') this.currentSpeed = state.currentSpeed;
+    if (typeof state.hitCount === 'number') this.hitCount = state.hitCount;
+    this._updateScore();
+  }
+
+  _sendState() {
+    if (!this.isInitiator || !this.opponentPeerId || !this.network.sendPongState) return;
+    this.network.sendPongState(this.opponentPeerId, this._captureState());
   }
 
   _handlePaddleHit(direction) {

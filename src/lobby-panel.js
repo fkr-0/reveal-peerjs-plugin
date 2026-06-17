@@ -13,6 +13,7 @@ export class LobbyPanel {
     this._dropdownOpen = false;
     this._contextMenu = null;
     this._onContextMenu = null;
+    this._outsideClickHandler = null;
   }
 
   render() {
@@ -25,7 +26,7 @@ export class LobbyPanel {
         <span>Lobby</span>
         <div style="display:flex;align-items:center;gap:6px">
           <span class="rpjs-status-dot" id="rpjs-status-dot"></span>
-          <button class="rpjs-lobby-close" id="rpjs-lobby-close">${CLOSE_ICON}</button>
+          <button class="rpjs-lobby-close" id="rpjs-lobby-close" type="button" aria-label="Close lobby panel">${CLOSE_ICON}</button>
         </div>
       </div>
       <div class="rpjs-resize-handle" id="rpjs-resize-handle" title="Drag to resize"></div>
@@ -33,13 +34,13 @@ export class LobbyPanel {
       <div class="rpjs-chat-section" id="rpjs-chat-messages"></div>
       <div class="rpjs-chat-input-area">
         <div class="rpjs-target-dropdown">
-          <button class="rpjs-target-btn ${this.chatTarget ? 'rpjs-private-active' : ''}" id="rpjs-target-btn">
+          <button class="rpjs-target-btn ${this.chatTarget ? 'rpjs-private-active' : ''}" id="rpjs-target-btn" type="button" aria-haspopup="listbox" aria-expanded="false">
             ${this.chatTarget ? this._getTargetName() : 'Lobby'} ${CHEVRON_DOWN}
           </button>
-          <div class="rpjs-target-dropdown-list" id="rpjs-target-dropdown"></div>
+          <div class="rpjs-target-dropdown-list" id="rpjs-target-dropdown" role="listbox" aria-label="Message target"></div>
         </div>
-        <input type="text" class="rpjs-chat-input" id="rpjs-chat-input" placeholder="Type a message..." autocomplete="off">
-        <button class="rpjs-send-btn" id="rpjs-send-btn">${SEND_ICON}</button>
+        <input type="text" class="rpjs-chat-input" id="rpjs-chat-input" placeholder="Type a message..." autocomplete="off" aria-label="Chat message">
+        <button class="rpjs-send-btn" id="rpjs-send-btn" type="button" aria-label="Send message">${SEND_ICON}</button>
       </div>
     `;
 
@@ -93,9 +94,10 @@ export class LobbyPanel {
     });
 
     // Click outside to close dropdown
-    document.addEventListener('click', () => {
+    this._outsideClickHandler = () => {
       this._closeDropdown();
-    });
+    };
+    document.addEventListener('click', this._outsideClickHandler);
 
     // Auto-focus input
     setTimeout(() => input.focus(), 100);
@@ -228,11 +230,14 @@ export class LobbyPanel {
   _toggleDropdown() {
     this._dropdownOpen = !this._dropdownOpen;
     const dropdown = this.el.querySelector('#rpjs-target-dropdown');
+    const btn = this.el.querySelector('#rpjs-target-btn');
     if (this._dropdownOpen) {
       this._renderDropdownItems();
       dropdown.classList.add('rpjs-open');
+      if (btn) btn.setAttribute('aria-expanded', 'true');
     } else {
       dropdown.classList.remove('rpjs-open');
+      if (btn) btn.setAttribute('aria-expanded', 'false');
     }
   }
 
@@ -240,6 +245,8 @@ export class LobbyPanel {
     this._dropdownOpen = false;
     const dropdown = this.el?.querySelector('#rpjs-target-dropdown');
     if (dropdown) dropdown.classList.remove('rpjs-open');
+    const btn = this.el?.querySelector('#rpjs-target-btn');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
   }
 
   _renderDropdownItems() {
@@ -248,7 +255,7 @@ export class LobbyPanel {
     const myId = this.network.myId;
 
     let html = `
-      <div class="rpjs-target-dropdown-item" data-target="">
+      <div class="rpjs-target-dropdown-item" role="option" data-target="">
         <span style="color:rgba(255,255,255,0.5)">${LOBBY_ICON}</span>
         <span>Lobby (Everyone)</span>
       </div>
@@ -257,7 +264,7 @@ export class LobbyPanel {
     for (const u of users) {
       if (u.id === myId) continue;
       html += `
-        <div class="rpjs-target-dropdown-item" data-target="${u.id}">
+        <div class="rpjs-target-dropdown-item" role="option" data-target="${u.id}">
           <span class="rpjs-user-dot" style="background:${u.color}"></span>
           <span>${u.username}${u.isHub ? ' [Hub]' : ''}</span>
         </div>
@@ -457,6 +464,10 @@ export class LobbyPanel {
   }
 
   destroy() {
+    if (this._outsideClickHandler) {
+      document.removeEventListener('click', this._outsideClickHandler);
+      this._outsideClickHandler = null;
+    }
     this._hideContextMenu();
     if (this.el) {
       this.el.remove();

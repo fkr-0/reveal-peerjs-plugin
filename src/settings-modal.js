@@ -11,6 +11,7 @@ export class SettingsModal {
     this.settings = { ...settings };
     this.onSettingsChange = onSettingsChange;
     this.el = null;
+    this._keyHandler = null;
   }
 
   render() {
@@ -23,21 +24,21 @@ export class SettingsModal {
       <div class="rpjs-modal">
         <div class="rpjs-modal-title">
           <span>Settings</span>
-          <button class="rpjs-modal-close" id="rpjs-settings-close">${CLOSE_ICON}</button>
+          <button class="rpjs-modal-close" id="rpjs-settings-close" type="button" aria-label="Close settings">${CLOSE_ICON}</button>
         </div>
 
         <div class="rpjs-field">
           <label class="rpjs-field-label">Username</label>
-          <input type="text" class="rpjs-field-input" id="rpjs-settings-username" 
+          <input type="text" class="rpjs-field-input" id="rpjs-settings-username"
                  value="${this._escapeAttr(this.settings.username)}" maxlength="24">
         </div>
 
         <div class="rpjs-field">
           <label class="rpjs-field-label">Custom Color</label>
           <div class="rpjs-color-row">
-            <input type="color" class="rpjs-color-picker" id="rpjs-settings-color-picker" 
+            <input type="color" class="rpjs-color-picker" id="rpjs-settings-color-picker"
                    value="${this.settings.color}">
-            <input type="text" class="rpjs-field-input rpjs-color-hex" id="rpjs-settings-color-hex" 
+            <input type="text" class="rpjs-field-input rpjs-color-hex" id="rpjs-settings-color-hex"
                    value="${this.settings.color}" maxlength="7">
           </div>
         </div>
@@ -45,8 +46,9 @@ export class SettingsModal {
         <div class="rpjs-field">
           <div class="rpjs-toggle-row">
             <span class="rpjs-toggle-label">Go Offline</span>
-            <button class="rpjs-toggle ${this.settings.goOffline ? 'rpjs-active' : ''}" 
-                    id="rpjs-toggle-offline" role="switch" 
+            <button class="rpjs-toggle ${this.settings.goOffline ? 'rpjs-active' : ''}"
+                    id="rpjs-toggle-offline" type="button" role="switch"
+                    aria-label="Go Offline"
                     aria-checked="${this.settings.goOffline}"></button>
           </div>
         </div>
@@ -54,8 +56,9 @@ export class SettingsModal {
         <div class="rpjs-field">
           <div class="rpjs-toggle-row">
             <span class="rpjs-toggle-label">Dark Mode</span>
-            <button class="rpjs-toggle ${this.settings.darkMode ? 'rpjs-active' : ''}" 
-                    id="rpjs-toggle-darkmode" role="switch"
+            <button class="rpjs-toggle ${this.settings.darkMode ? 'rpjs-active' : ''}"
+                    id="rpjs-toggle-darkmode" type="button" role="switch"
+                    aria-label="Dark Mode"
                     aria-checked="${this.settings.darkMode}"></button>
           </div>
         </div>
@@ -63,13 +66,14 @@ export class SettingsModal {
         <div class="rpjs-field">
           <div class="rpjs-toggle-row">
             <span class="rpjs-toggle-label">High Contrast / Assisted Visuals</span>
-            <button class="rpjs-toggle ${this.settings.highContrast ? 'rpjs-active' : ''}" 
-                    id="rpjs-toggle-highcontrast" role="switch"
+            <button class="rpjs-toggle ${this.settings.highContrast ? 'rpjs-active' : ''}"
+                    id="rpjs-toggle-highcontrast" type="button" role="switch"
+                    aria-label="High Contrast / Assisted Visuals"
                     aria-checked="${this.settings.highContrast}"></button>
           </div>
         </div>
 
-        <button class="rpjs-save-btn" id="rpjs-settings-save">Save & Apply</button>
+        <button class="rpjs-save-btn" id="rpjs-settings-save" type="button">Save & Apply</button>
       </div>
     `;
 
@@ -88,6 +92,11 @@ export class SettingsModal {
     this.el.addEventListener('click', (e) => {
       if (e.target === this.el) this.close();
     });
+
+    this._keyHandler = (e) => {
+      if (e.key === 'Escape') this.close();
+    };
+    document.addEventListener('keydown', this._keyHandler);
 
     // Color picker ↔ hex sync
     const picker = this.el.querySelector('#rpjs-settings-color-picker');
@@ -164,6 +173,10 @@ export class SettingsModal {
   }
 
   close() {
+    if (this._keyHandler) {
+      document.removeEventListener('keydown', this._keyHandler);
+      this._keyHandler = null;
+    }
     if (this.el) {
       this.el.remove();
       this.el = null;

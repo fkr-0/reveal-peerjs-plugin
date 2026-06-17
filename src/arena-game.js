@@ -19,37 +19,37 @@
  */
 
 import { CLOSE_ICON } from './icons.js';
-
-// ---------- Constants ----------
-const PLAYER_RADIUS = 14;
-const DIRECTION_LINE_LEN = 22;
-const BASE_SPEED = 3;
-const BOOST_SPEED = 5;
-const BULLET_SPEED = 8;
-const BULLET_LENGTH = 8;
-const SHOOT_COOLDOWN = 300; // ms
-const BULLET_COUNT_CLOSE = 8;
-const BULLET_COUNT_FAR = 2;
-const SPREAD_CLOSE = 0.12; // per-bullet radians when close (wide shotgun)
-const SPREAD_FAR = 0.02;   // per-bullet radians when far (tight sniper)
-const SPREAD_MIN_DIST = 40;
-const SPREAD_MAX_DIST = 350;
-const WALL_COUNT = 18;
-const WALL_MIN_LEN = 40;
-const WALL_MAX_LEN = 140;
-const HIT_RADIUS = PLAYER_RADIUS + 4;
-const SEND_RATE = 50; // ms between state broadcasts (hub)
-const INPUT_SEND_RATE = 33; // ms between input sends (client)
+import {
+  PLAYER_RADIUS,
+  DIRECTION_LINE_LEN,
+  BASE_SPEED,
+  BOOST_SPEED,
+  BULLET_SPEED,
+  BULLET_LENGTH,
+  BULLET_COUNT_CLOSE,
+  BULLET_COUNT_FAR,
+  SPREAD_CLOSE,
+  SPREAD_FAR,
+  SPREAD_MIN_DIST,
+  SPREAD_MAX_DIST,
+  SEND_RATE,
+  INPUT_SEND_RATE,
+  BASE_HP,
+  WEAPONS,
+  ITEM_TYPES,
+} from './arena-rules.js';
+import {
+  clamp,
+  dist,
+  updateBullets,
+  applyBulletCollisions,
+  updateItems,
+} from './arena-sim.js';
+import { generatePlayableMap } from './arena-map.js';
+import { bindArenaInput, unbindArenaInput } from './arena-input.js';
+import { drawArena, updateArenaHud, updateArenaScoreboard } from './arena-render.js';
 
 // ---------- Helpers ----------
-function dist(x1, y1, x2, y2) {
-  return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
-}
-
-function clamp(v, min, max) {
-  return Math.max(min, Math.min(max, v));
-}
-
 // Line-segment / circle intersection
 function lineCircleIntersect(x1, y1, x2, y2, cx, cy, r) {
   const dx = x2 - x1;
@@ -76,35 +76,6 @@ function lineLineIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
   return t >= 0 && t <= 1 && u >= 0 && u <= 1;
 }
 
-function seededRandom(seed) {
-  let s = seed;
-  return function () {
-    s = (s * 1103515245 + 12345) & 0x7fffffff;
-    return s / 0x7fffffff;
-  };
-}
-
-// ---------- Wall generation ----------
-function generateWalls(W, H, seed) {
-  const rng = seededRandom(seed);
-  const walls = [];
-  const margin = 60;
-  for (let i = 0; i < WALL_COUNT; i++) {
-    const cx = margin + rng() * (W - margin * 2);
-    const cy = margin + rng() * (H - margin * 2);
-    const angle = rng() * Math.PI;
-    const len = WALL_MIN_LEN + rng() * (WALL_MAX_LEN - WALL_MIN_LEN);
-    const halfLen = len / 2;
-    walls.push({
-      x1: cx - Math.cos(angle) * halfLen,
-      y1: cy - Math.sin(angle) * halfLen,
-      x2: cx + Math.cos(angle) * halfLen,
-      y2: cy + Math.sin(angle) * halfLen,
-    });
-  }
-  return walls;
-}
-
 // ---------- Arena Game Class ----------
 export class ArenaGame {
   constructor(network, isHub, { onStart, onStop } = {}) {
@@ -123,17 +94,26 @@ export class ArenaGame {
     this.H = 0;
 
     // Game state
-    this.players = new Map(); // peerId -> { x, y, angle, color, username, hitCount, eliminated }
+    this.players = new Map(); // peerId -> { x, y, angle, color, username, hp, armor, weapon, eliminated }
     this.walls = [];
     this.bullets = []; // { x, y, vx, vy, from, color, life }
     this.seed = 0;
     this.gameId = null;
+    this.items = []; // { id, type, x, y, ttl }
+    this._itemSpawnAt = 0;
+    this.zombieMode = false;
+    this.zombies = [];
+    this._zombiesPerMin = 10;
+    this._nextZombieSpawnAt = 0;
+    this._zombieStartAt = 0;
+    this._zombiesDefeated = 0;
+    this._zombieWave = 1;
+    this._nextWaveAtKills = 10;
 
     // Local input state
     this.keysDown = new Set();
     this.mouseX = 0;
     this.mouseY = 0;
-    this.lastShootTime = 0;
 
     // Touch input
     this.touchDx = 0;
@@ -153,10 +133,15 @@ export class ArenaGame {
     this._onArenaShoot = null;
     this._onArenaHit = null;
     this._onArenaEnd = null;
+    this._statusText = '';
+    this._statusTextUntil = 0;
     this._keyDownHandler = null;
     this._keyUpHandler = null;
     this._mouseMoveHandler = null;
+    this._mouseDownHandler = null;
     this._resizeHandler = null;
+    this._canvasTouchHandler = null;
+    this._spawnPoints = [];
   }
 
   /**
@@ -169,8 +154,11 @@ export class ArenaGame {
     this._render();
     this._resize();
 
-    // Generate walls from seed
-    this.walls = generateWalls(this.W, this.H, this.seed);
+    // Generate playable map from seed
+    const userCount = Math.max(1, this.network.getUserList().length + (this.network.myUser ? 1 : 0));
+    const map = generatePlayableMap(this.W, this.H, this.seed, userCount);
+    this.walls = map.walls;
+    this._spawnPoints = map.spawns;
 
     // Build full user list (visitors don't include themselves in getUserList)
     const userList = this.network.getUserList();
@@ -190,19 +178,32 @@ export class ArenaGame {
       });
     }
 
-    const margin = 80;
-    const rng = seededRandom(this.seed + 999);
-    for (const user of userList) {
-      const x = margin + rng() * (this.W - margin * 2);
-      const y = margin + rng() * (this.H - margin * 2);
+    for (let i = 0; i < userList.length; i++) {
+      const user = userList[i];
+      const spawn = this._spawnPoints[i % this._spawnPoints.length] || { x: this.W / 2, y: this.H / 2 };
       this.players.set(user.id, {
-        x, y,
+        x: spawn.x, y: spawn.y,
         angle: 0,
         color: user.color,
         username: user.username,
-        hitCount: 0,
+        hp: BASE_HP,
+        armor: 0,
+        weapon: 'blaster',
+        weaponUntil: 0,
+        lastShootTime: 0,
         eliminated: false,
       });
+    }
+
+    this.zombieMode = this.isHub && this.players.size === 1;
+    this._zombiesPerMin = 10;
+    this._zombieStartAt = Date.now();
+    this._nextZombieSpawnAt = Date.now() + 2500;
+    this._zombiesDefeated = 0;
+    this._zombieWave = 1;
+    this._nextWaveAtKills = 10;
+    if (this.zombieMode) {
+      this._setStatus('Zombie Mode: survive as long as possible');
     }
 
     this._bindEvents();
@@ -284,151 +285,21 @@ export class ArenaGame {
     this.H = window.innerHeight;
     this.canvas.width = this.W;
     this.canvas.height = this.H;
-    // Regenerate walls on resize
+    // Regenerate map on resize
     if (this.seed) {
-      this.walls = generateWalls(this.W, this.H, this.seed);
+      const map = generatePlayableMap(this.W, this.H, this.seed, Math.max(1, this.players.size));
+      this.walls = map.walls;
     }
   }
 
   // ---------- Events ----------
 
   _bindEvents() {
-    this._keyDownHandler = (e) => {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      const key = e.key.toLowerCase();
-      this.keysDown.add(key);
-
-      if (key === ' ' && this.running) {
-        this._shoot();
-      }
-      if (key === 'escape') {
-        this.stop();
-      }
-    };
-    this._keyUpHandler = (e) => {
-      e.stopImmediatePropagation();
-      this.keysDown.delete(e.key.toLowerCase());
-    };
-    this._mouseMoveHandler = (e) => {
-      this.mouseX = e.clientX;
-      this.mouseY = e.clientY;
-      // Update local player angle
-      const me = this.players.get(this.network.myId);
-      if (me) {
-        me.angle = Math.atan2(this.mouseY - me.y, this.mouseX - me.x);
-      }
-    };
-    this._resizeHandler = () => this._resize();
-
-    document.addEventListener('keydown', this._keyDownHandler, true);
-    document.addEventListener('keyup', this._keyUpHandler, true);
-    this._mouseDownHandler = (e) => {
-      if (e.button === 0 && this.running) {
-        this._shoot();
-      }
-    };
-
-    this.el.addEventListener('mousemove', this._mouseMoveHandler);
-    this.canvas.addEventListener('mousedown', this._mouseDownHandler);
-    window.addEventListener('resize', this._resizeHandler);
-
-    this.el.querySelector('#rpjs-arena-exit').addEventListener('click', () => {
-      this.stop();
-    });
-
-    this._bindTouchEvents();
-  }
-
-  _bindTouchEvents() {
-    this._isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-    if (!this._isTouchDevice) return;
-
-    const joystick = this.el.querySelector('#rpjs-arena-joystick');
-    const knob = this.el.querySelector('#rpjs-arena-joystick-knob');
-    const shootBtn = this.el.querySelector('#rpjs-arena-shoot-btn');
-    const RADIUS = 55;
-
-    // --- Joystick ---
-    const joyStart = (e) => {
-      e.preventDefault();
-      const touch = e.changedTouches[0];
-      this._joystickTouchId = touch.identifier;
-      const rect = joystick.getBoundingClientRect();
-      this._joystickCenter = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-    };
-
-    const joyMove = (e) => {
-      e.preventDefault();
-      for (const touch of e.changedTouches) {
-        if (touch.identifier !== this._joystickTouchId) continue;
-        const dx = touch.clientX - this._joystickCenter.x;
-        const dy = touch.clientY - this._joystickCenter.y;
-        const d = Math.sqrt(dx * dx + dy * dy);
-        if (d > 8) {
-          const clamped = Math.min(d, RADIUS);
-          this.touchDx = dx / d;
-          this.touchDy = dy / d;
-          knob.style.transform = `translate(calc(-50% + ${(dx / d) * clamped}px), calc(-50% + ${(dy / d) * clamped}px))`;
-        } else {
-          this.touchDx = 0;
-          this.touchDy = 0;
-          knob.style.transform = 'translate(-50%, -50%)';
-        }
-      }
-    };
-
-    const joyEnd = (e) => {
-      for (const touch of e.changedTouches) {
-        if (touch.identifier !== this._joystickTouchId) continue;
-        this._joystickTouchId = null;
-        this.touchDx = 0;
-        this.touchDy = 0;
-        knob.style.transform = 'translate(-50%, -50%)';
-      }
-    };
-
-    joystick.addEventListener('touchstart', joyStart, { passive: false });
-    joystick.addEventListener('touchmove', joyMove, { passive: false });
-    joystick.addEventListener('touchend', joyEnd);
-    joystick.addEventListener('touchcancel', joyEnd);
-
-    // --- Shoot button (auto-fire while held) ---
-    shootBtn.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      this._shoot();
-      this._shootTouchInterval = setInterval(() => this._shoot(), SHOOT_COOLDOWN + 50);
-    }, { passive: false });
-
-    const stopShoot = () => {
-      if (this._shootTouchInterval) { clearInterval(this._shootTouchInterval); this._shootTouchInterval = null; }
-    };
-    shootBtn.addEventListener('touchend', stopShoot);
-    shootBtn.addEventListener('touchcancel', stopShoot);
-
-    // --- Aim: touch on canvas (any touch not on joystick/button) ---
-    this._canvasTouchHandler = (e) => {
-      e.preventDefault();
-      for (const touch of e.touches) {
-        if (touch.identifier === this._joystickTouchId) continue;
-        const el = document.elementFromPoint(touch.clientX, touch.clientY);
-        if (el && (el === shootBtn || joystick.contains(el))) continue;
-        this.mouseX = touch.clientX;
-        this.mouseY = touch.clientY;
-        const me = this.players.get(this.network.myId);
-        if (me) me.angle = Math.atan2(touch.clientY - me.y, touch.clientX - me.x);
-        break;
-      }
-    };
-    this.canvas.addEventListener('touchstart', this._canvasTouchHandler, { passive: false });
-    this.canvas.addEventListener('touchmove', this._canvasTouchHandler, { passive: false });
+    bindArenaInput(this);
   }
 
   _unbindEvents() {
-    document.removeEventListener('keydown', this._keyDownHandler, true);
-    document.removeEventListener('keyup', this._keyUpHandler, true);
-    if (this.el) this.el.removeEventListener('mousemove', this._mouseMoveHandler);
-    window.removeEventListener('resize', this._resizeHandler);
+    unbindArenaInput(this);
 
     if (this._onArenaState) this.network.off('arena-state', this._onArenaState);
     if (this._onArenaInput) this.network.off('arena-input', this._onArenaInput);
@@ -453,7 +324,7 @@ export class ArenaGame {
 
     if (dx === 0 && dy === 0) return;
 
-    const speed = me.hitCount > 0 ? BOOST_SPEED : BASE_SPEED;
+    const speed = this._moveSpeedFor(me);
     const len = Math.sqrt(dx * dx + dy * dy);
     const norm = len > 1 ? len : 1;
     dx = (dx / norm) * speed;
@@ -477,13 +348,18 @@ export class ArenaGame {
     if (!me || me.eliminated) return;
 
     const now = Date.now();
-    if (now - this.lastShootTime < SHOOT_COOLDOWN) return;
-    this.lastShootTime = now;
+    const weaponCfg = this._weaponConfigFor(me);
+    if (now - me.lastShootTime < weaponCfg.cooldown) return;
+    me.lastShootTime = now;
 
     const d = dist(me.x, me.y, this.mouseX, this.mouseY);
     const t = clamp((d - SPREAD_MIN_DIST) / (SPREAD_MAX_DIST - SPREAD_MIN_DIST), 0, 1);
-    const count = Math.round(BULLET_COUNT_CLOSE + (BULLET_COUNT_FAR - BULLET_COUNT_CLOSE) * t);
-    const spread = SPREAD_CLOSE + (SPREAD_FAR - SPREAD_CLOSE) * t;
+    const count = weaponCfg.count == null
+      ? Math.round(BULLET_COUNT_CLOSE + (BULLET_COUNT_FAR - BULLET_COUNT_CLOSE) * t)
+      : weaponCfg.count;
+    const spread = weaponCfg.spread == null
+      ? SPREAD_CLOSE + (SPREAD_FAR - SPREAD_CLOSE) * t
+      : weaponCfg.spread;
 
     const shootData = {
       x: me.x,
@@ -492,6 +368,10 @@ export class ArenaGame {
       color: me.color,
       count,
       spread,
+      damage: weaponCfg.damage,
+      bulletSpeed: weaponCfg.bulletSpeed,
+      life: weaponCfg.life,
+      weapon: me.weapon,
     };
 
     this._createBullets(this.network.myId, shootData);
@@ -502,18 +382,39 @@ export class ArenaGame {
     const count = data.count || BULLET_COUNT_CLOSE;
     const spread = data.spread != null ? data.spread : SPREAD_CLOSE;
 
+    const bulletSpeed = data.bulletSpeed || BULLET_SPEED;
+    const bulletLife = data.life || 120;
+    const bulletDamage = data.damage || 25;
     for (let i = 0; i < count; i++) {
       const spreadAngle = data.angle + (i - (count - 1) / 2) * spread;
       this.bullets.push({
         x: data.x + Math.cos(data.angle) * (PLAYER_RADIUS + 4),
         y: data.y + Math.sin(data.angle) * (PLAYER_RADIUS + 4),
-        vx: Math.cos(spreadAngle) * BULLET_SPEED,
-        vy: Math.sin(spreadAngle) * BULLET_SPEED,
+        vx: Math.cos(spreadAngle) * bulletSpeed,
+        vy: Math.sin(spreadAngle) * bulletSpeed,
         from: fromId,
         color: data.color,
-        life: 120,
+        life: bulletLife,
+        speed: bulletSpeed,
+        damage: bulletDamage,
+        weapon: data.weapon || 'blaster',
       });
     }
+  }
+
+  _moveSpeedFor(player) {
+    const hpRatio = clamp((player.hp || BASE_HP) / BASE_HP, 0.3, 1);
+    const base = BASE_SPEED + (BOOST_SPEED - BASE_SPEED) * (1 - hpRatio);
+    return player.weapon === 'rapid' ? base + 0.5 : base;
+  }
+
+  _weaponConfigFor(player) {
+    const now = Date.now();
+    if (player.weapon !== 'blaster' && player.weaponUntil && now > player.weaponUntil) {
+      player.weapon = 'blaster';
+      player.weaponUntil = 0;
+    }
+    return WEAPONS[player.weapon] || WEAPONS.blaster;
   }
 
   _resolveWalls(player) {
@@ -560,7 +461,8 @@ export class ArenaGame {
     // Apply hit from authoritative state
     const player = this.players.get(hit.targetId);
     if (player) {
-      player.hitCount = hit.hitCount;
+      player.hp = hit.hp;
+      player.armor = hit.armor || 0;
       player.eliminated = hit.eliminated;
     }
     // Add visual hit flash
@@ -574,7 +476,10 @@ export class ArenaGame {
         x: Math.round(p.x * 10) / 10,
         y: Math.round(p.y * 10) / 10,
         angle: Math.round(p.angle * 100) / 100,
-        hitCount: p.hitCount,
+        hp: p.hp,
+        armor: p.armor,
+        weapon: p.weapon,
+        weaponUntil: p.weaponUntil || 0,
         eliminated: p.eliminated,
       };
     }
@@ -587,12 +492,21 @@ export class ArenaGame {
       from: b.from,
       color: b.color,
       life: b.life,
+      damage: b.damage,
+      speed: b.speed,
+      weapon: b.weapon,
     }));
 
     this.network.broadcastArenaState({
       gameId: this.gameId,
       players: playerStates,
       bullets: bulletStates,
+      items: this.items,
+      zombies: this.zombies,
+      zombieMode: this.zombieMode,
+      zombiesPerMin: this._zombiesPerMin,
+      zombieWave: this._zombieWave,
+      zombiesDefeated: this._zombiesDefeated,
     });
   }
 
@@ -604,7 +518,10 @@ export class ArenaGame {
     for (const [id, ps] of Object.entries(state.players || {})) {
       let player = this.players.get(id);
       if (!player) {
-        player = { x: ps.x, y: ps.y, angle: ps.angle, color: '#4fc3f7', username: '?', hitCount: 0, eliminated: false };
+        player = {
+          x: ps.x, y: ps.y, angle: ps.angle, color: '#4fc3f7', username: '?',
+          hp: BASE_HP, armor: 0, weapon: 'blaster', weaponUntil: 0, lastShootTime: 0, eliminated: false
+        };
         this.players.set(id, player);
       }
       if (id !== this.network.myId) {
@@ -612,12 +529,21 @@ export class ArenaGame {
         player.y = ps.y;
         player.angle = ps.angle;
       }
-      player.hitCount = ps.hitCount;
+      player.hp = ps.hp ?? BASE_HP;
+      player.armor = ps.armor ?? 0;
+      player.weapon = ps.weapon || 'blaster';
+      player.weaponUntil = ps.weaponUntil || 0;
       player.eliminated = ps.eliminated;
     }
 
     // Replace bullets with server state (authoritative)
     this.bullets = (state.bullets || []).map(b => ({ ...b }));
+    this.items = (state.items || []).map(i => ({ ...i }));
+    this.zombies = (state.zombies || []).map(z => ({ ...z }));
+    this.zombieMode = !!state.zombieMode;
+    this._zombiesPerMin = state.zombiesPerMin || this._zombiesPerMin;
+    this._zombieWave = state.zombieWave || this._zombieWave;
+    this._zombiesDefeated = state.zombiesDefeated || this._zombiesDefeated;
   }
 
   // ---------- Game loop ----------
@@ -635,6 +561,7 @@ export class ArenaGame {
     if (!this.running) return;
 
     this._draw();
+    this._updateHud();
     this._updateScoreboard();
 
     this.animFrame = requestAnimationFrame(() => this._loop());
@@ -652,7 +579,7 @@ export class ArenaGame {
       dy += this.touchDy;
 
       if (dx !== 0 || dy !== 0) {
-        const speed = me.hitCount > 0 ? BOOST_SPEED : BASE_SPEED;
+        const speed = this._moveSpeedFor(me);
         const len = Math.sqrt(dx * dx + dy * dy);
         const norm = len > 1 ? len : 1;
         me.x = clamp(me.x + (dx / norm) * speed, PLAYER_RADIUS, this.W - PLAYER_RADIUS);
@@ -664,6 +591,8 @@ export class ArenaGame {
 
     // Update bullets
     this._updateBullets();
+    this._updateItems();
+    this._updateZombies();
 
     // Check bullet-player collisions (hub only)
     this._checkBulletCollisions();
@@ -682,75 +611,46 @@ export class ArenaGame {
   }
 
   _updateBullets() {
-    for (let i = this.bullets.length - 1; i >= 0; i--) {
-      const b = this.bullets[i];
-      b.x += b.vx;
-      b.y += b.vy;
-      b.life--;
-
-      // Check if out of bounds
-      if (b.x < -20 || b.x > this.W + 20 || b.y < -20 || b.y > this.H + 20 || b.life <= 0) {
-        this.bullets.splice(i, 1);
-        continue;
-      }
-
-      // Check wall collision
-      let hitWall = false;
-      for (const w of this.walls) {
-        if (lineLineIntersect(b.x - b.vx, b.y - b.vy, b.x, b.y, w.x1, w.y1, w.x2, w.y2)) {
-          hitWall = true;
-          break;
-        }
-      }
-      if (hitWall) {
-        // Spawn impact spark
-        this._sparks.push({ x: b.x, y: b.y, life: 6, color: b.color });
-        this.bullets.splice(i, 1);
-      }
-    }
+    updateBullets({
+      bullets: this.bullets,
+      W: this.W,
+      H: this.H,
+      walls: this.walls,
+      sparks: this._sparks,
+    }, lineLineIntersect);
   }
 
   _checkBulletCollisions() {
     if (!this.isHub) return;
+    if (this.zombieMode) this._checkZombieBulletCollisions();
+    applyBulletCollisions({
+      bullets: this.bullets,
+      players: this.players,
+      hitFlashes: this._hitFlashes,
+      sparks: this._sparks,
+    }, (hitData) => {
+      this.network.broadcastArenaHit(hitData);
+      this._checkGameOver();
+    });
+  }
 
+  _checkZombieBulletCollisions() {
     for (let bi = this.bullets.length - 1; bi >= 0; bi--) {
       const b = this.bullets[bi];
-
-      for (const [pid, player] of this.players) {
-        if (pid === b.from) continue; // Don't hit yourself
-        if (player.eliminated) continue;
-
-        const d = dist(b.x, b.y, player.x, player.y);
-        if (d < HIT_RADIUS) {
-          // Hit!
-          player.hitCount++;
-          if (player.hitCount >= 2) {
-            player.eliminated = true;
-          }
-
-          const hitData = {
-            targetId: pid,
-            hitCount: player.hitCount,
-            eliminated: player.eliminated,
-            x: player.x,
-            y: player.y,
-            color: player.color,
-          };
-
-          // Broadcast hit to all
-          this.network.broadcastArenaHit(hitData);
-
-          // Apply locally too
-          this._hitFlashes.push({ x: player.x, y: player.y, time: 15, color: '#fff' });
-          this._sparks.push({ x: b.x, y: b.y, life: 8, color: b.color });
-
-          // Remove bullet
-          this.bullets.splice(bi, 1);
-
-          // Check game over
-          this._checkGameOver();
-          break;
+      for (let zi = this.zombies.length - 1; zi >= 0; zi--) {
+        const z = this.zombies[zi];
+        const d = dist(b.x, b.y, z.x, z.y);
+        if (d > z.r + 3) continue;
+        z.hp -= (b.damage || 25);
+        this._sparks.push({ x: b.x, y: b.y, life: 7, color: z.color });
+        this.bullets.splice(bi, 1);
+        if (z.hp <= 0) {
+          this._zombiesDefeated++;
+          this._setStatus(`Zombie down! (${this._zombiesDefeated})`);
+          this.zombies.splice(zi, 1);
+          this._checkWaveMilestone();
         }
+        break;
       }
     }
   }
@@ -758,7 +658,131 @@ export class ArenaGame {
   _hitFlashes = [];
   _sparks = [];
 
+  _updateItems() {
+    if (!this.isHub) return;
+    const state = {
+      items: this.items,
+      players: this.players,
+      walls: this.walls,
+      W: this.W,
+      H: this.H,
+      itemSpawnAt: this._itemSpawnAt,
+    };
+    updateItems(state, lineCircleIntersect, (text) => this._setStatus(text));
+    this._itemSpawnAt = state.itemSpawnAt;
+  }
+
+  _updateZombies() {
+    if (!this.zombieMode || !this.isHub) return;
+    const now = Date.now();
+    const elapsedMin = (now - this._zombieStartAt) / 60000;
+    this._zombiesPerMin = 10 + elapsedMin * 8;
+    const intervalMs = Math.max(240, 60000 / this._zombiesPerMin);
+    if (now >= this._nextZombieSpawnAt) {
+      this._spawnZombie();
+      this._nextZombieSpawnAt = now + intervalMs;
+    }
+
+    const target = this.players.get(this.network.myId);
+    if (!target || target.eliminated) return;
+    for (let i = this.zombies.length - 1; i >= 0; i--) {
+      const z = this.zombies[i];
+      const dx = target.x - z.x;
+      const dy = target.y - z.y;
+      const d = Math.max(0.001, Math.sqrt(dx * dx + dy * dy));
+      const speed = z.speed * (1 + elapsedMin * 0.2);
+      z.x += (dx / d) * speed;
+      z.y += (dy / d) * speed;
+
+      if (d < z.r + PLAYER_RADIUS + 2 && now - (z.lastBiteAt || 0) > 500) {
+        z.lastBiteAt = now;
+        target.hp -= 8;
+        if (target.hp <= 0) {
+          target.hp = 0;
+          target.eliminated = true;
+          this._checkGameOver();
+        }
+      }
+      if (z.hp <= 0) this.zombies.splice(i, 1);
+    }
+  }
+
+  _spawnZombie() {
+    const side = Math.floor(Math.random() * 4);
+    let x = 0; let y = 0;
+    if (side === 0) { x = Math.random() * this.W; y = -30; }
+    if (side === 1) { x = this.W + 30; y = Math.random() * this.H; }
+    if (side === 2) { x = Math.random() * this.W; y = this.H + 30; }
+    if (side === 3) { x = -30; y = Math.random() * this.H; }
+    const runnerBias = Math.min(0.75, 0.55 + this._zombieWave * 0.03);
+    const isRunner = Math.random() < runnerBias;
+    const archetype = isRunner ? 'runner' : 'tank';
+    const stats = isRunner
+      ? { r: 10 + Math.random() * 2, hp: 28 + this._zombieWave * 2, speed: 1.1 + Math.random() * 0.45, color: '#4dd0e1' }
+      : { r: 16 + Math.random() * 3, hp: 95 + this._zombieWave * 7, speed: 0.42 + Math.random() * 0.2, color: '#ff8a65' };
+    this.zombies.push({
+      id: `z-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      x, y,
+      r: stats.r,
+      hp: stats.hp,
+      maxHp: stats.hp,
+      speed: stats.speed,
+      color: stats.color,
+      archetype,
+      lastBiteAt: 0,
+    });
+  }
+
+  _checkWaveMilestone() {
+    if (!this.zombieMode || !this.isHub) return;
+    if (this._zombiesDefeated < this._nextWaveAtKills) return;
+    this._zombieWave++;
+    this._nextWaveAtKills += 8 + this._zombieWave * 2;
+    this._zombiesPerMin += 2.5;
+    this._setStatus(`Wave ${this._zombieWave}! Reward drop incoming`);
+    this._dropWaveRewards();
+  }
+
+  _dropWaveRewards() {
+    const rewardTypes = ['heal', 'armor', 'rapid', 'spread', 'sniper'];
+    const dropCount = Math.min(5, 2 + Math.floor(this._zombieWave / 2));
+    const my = this.players.get(this.network.myId);
+    const cx = my ? my.x : this.W / 2;
+    const cy = my ? my.y : this.H / 2;
+    for (let i = 0; i < dropCount; i++) {
+      const t = rewardTypes[Math.floor(Math.random() * rewardTypes.length)];
+      if (!ITEM_TYPES[t]) continue;
+      const angle = (Math.PI * 2 * i) / dropCount;
+      const radius = 56 + Math.random() * 36;
+      this.items.push({
+        id: `it-wave-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+        type: t,
+        x: clamp(cx + Math.cos(angle) * radius, 30, this.W - 30),
+        y: clamp(cy + Math.sin(angle) * radius, 30, this.H - 30),
+        ttl: 900,
+      });
+    }
+  }
+
+  _setStatus(text) {
+    this._statusText = text;
+    this._statusTextUntil = Date.now() + 1800;
+  }
+
   _checkGameOver() {
+    if (this.zombieMode) {
+      const me = this.players.get(this.network.myId);
+      if (me && !me.eliminated) return;
+      this.network.broadcastArenaEnd({
+        gameId: this.gameId,
+        winner: null,
+        zombieMode: true,
+        durationMs: Date.now() - this._zombieStartAt,
+        zombiesDefeated: (this._zombiesDefeated || 0),
+        zombieWave: this._zombieWave,
+      });
+      return;
+    }
     const alivePlayers = [];
     for (const [id, p] of this.players) {
       if (!p.eliminated) alivePlayers.push({ id, username: p.username, color: p.color });
@@ -772,7 +796,9 @@ export class ArenaGame {
           id,
           username: p.username,
           color: p.color,
-          hitCount: p.hitCount,
+          hp: p.hp,
+          armor: p.armor,
+          weapon: p.weapon,
           eliminated: p.eliminated,
         })),
       });
@@ -792,7 +818,13 @@ export class ArenaGame {
     ctx.textAlign = 'center';
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 36px -apple-system, sans-serif';
-    if (results.winner) {
+    if (results.zombieMode) {
+      const sec = Math.round((results.durationMs || 0) / 1000);
+      ctx.fillText(`Survived ${sec}s`, this.W / 2, this.H / 2 - 20);
+      ctx.font = '18px -apple-system, sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.fillText(`Wave ${results.zombieWave || this._zombieWave} · ${results.zombiesDefeated || 0} zombies defeated`, this.W / 2, this.H / 2 + 8);
+    } else if (results.winner) {
       ctx.fillText(`${results.winner.username} Wins!`, this.W / 2, this.H / 2 - 20);
     } else {
       ctx.fillText('Draw!', this.W / 2, this.H / 2 - 20);
@@ -808,215 +840,11 @@ export class ArenaGame {
 
   // ---------- Drawing ----------
 
-  _draw() {
-    const ctx = this.ctx;
+  _draw() { drawArena(this); }
 
-    ctx.clearRect(0, 0, this.W, this.H);
+  _updateScoreboard() { updateArenaScoreboard(this); }
 
-    // Subtle grid
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
-    ctx.lineWidth = 1;
-    const gridSize = 60;
-    for (let x = 0; x < this.W; x += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, this.H);
-      ctx.stroke();
-    }
-    for (let y = 0; y < this.H; y += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(this.W, y);
-      ctx.stroke();
-    }
-
-    // Draw walls
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    for (const w of this.walls) {
-      ctx.beginPath();
-      ctx.moveTo(w.x1, w.y1);
-      ctx.lineTo(w.x2, w.y2);
-      ctx.stroke();
-    }
-    // Wall glow
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-    ctx.lineWidth = 8;
-    for (const w of this.walls) {
-      ctx.beginPath();
-      ctx.moveTo(w.x1, w.y1);
-      ctx.lineTo(w.x2, w.y2);
-      ctx.stroke();
-    }
-
-    // Draw bullets
-    for (const b of this.bullets) {
-      const tailX = b.x - (b.vx / BULLET_SPEED) * BULLET_LENGTH;
-      const tailY = b.y - (b.vy / BULLET_SPEED) * BULLET_LENGTH;
-
-      ctx.strokeStyle = b.color || 'rgba(255, 255, 255, 0.8)';
-      ctx.lineWidth = 2;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(tailX, tailY);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
-
-      // Bullet glow
-      ctx.strokeStyle = (b.color || 'rgba(255,255,255,0.8)').replace(')', ',0.3)').replace('rgb', 'rgba');
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.moveTo(tailX, tailY);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
-    }
-
-    // Draw sparks
-    for (let i = this._sparks.length - 1; i >= 0; i--) {
-      const s = this._sparks[i];
-      ctx.fillStyle = `rgba(255, 200, 50, ${s.life / 8})`;
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, 3 * (s.life / 8), 0, Math.PI * 2);
-      ctx.fill();
-      s.life--;
-      if (s.life <= 0) this._sparks.splice(i, 1);
-    }
-
-    // Draw hit flashes
-    for (let i = this._hitFlashes.length - 1; i >= 0; i--) {
-      const f = this._hitFlashes[i];
-      ctx.fillStyle = `rgba(255, 255, 255, ${f.time / 15 * 0.4})`;
-      ctx.beginPath();
-      ctx.arc(f.x, f.y, PLAYER_RADIUS * 2 * (1 - f.time / 15) + PLAYER_RADIUS, 0, Math.PI * 2);
-      ctx.fill();
-      f.time--;
-      if (f.time <= 0) this._hitFlashes.splice(i, 1);
-    }
-
-    // Draw players
-    const myId = this.network.myId;
-    for (const [pid, p] of this.players) {
-      const isMe = pid === myId;
-      const alpha = p.eliminated ? 0.2 : 1;
-
-      // Player circle
-      ctx.save();
-      ctx.globalAlpha = alpha;
-
-      if (p.eliminated) {
-        // Ghost marker
-        ctx.strokeStyle = p.color;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, PLAYER_RADIUS, 0, Math.PI * 2);
-        ctx.stroke();
-        // X through it
-        ctx.beginPath();
-        ctx.moveTo(p.x - 6, p.y - 6);
-        ctx.lineTo(p.x + 6, p.y + 6);
-        ctx.moveTo(p.x + 6, p.y - 6);
-        ctx.lineTo(p.x - 6, p.y + 6);
-        ctx.stroke();
-      } else {
-        if (p.hitCount > 0) {
-          // Half-filled circle: filled on one side
-          ctx.fillStyle = p.color;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, PLAYER_RADIUS, -Math.PI / 2, Math.PI / 2);
-          ctx.fill();
-          // Unfilled half
-          ctx.strokeStyle = p.color;
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, PLAYER_RADIUS, Math.PI / 2, -Math.PI / 2);
-          ctx.stroke();
-        } else {
-          // Full circle
-          ctx.fillStyle = p.color;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, PLAYER_RADIUS, 0, Math.PI * 2);
-          ctx.fill();
-        }
-
-        // Player outline
-        ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, PLAYER_RADIUS, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Direction line (only visible for yourself)
-        if (isMe) {
-          ctx.strokeStyle = p.color;
-          ctx.lineWidth = 3;
-          ctx.lineCap = 'round';
-          ctx.beginPath();
-          ctx.moveTo(
-            p.x + Math.cos(p.angle) * PLAYER_RADIUS,
-            p.y + Math.sin(p.angle) * PLAYER_RADIUS
-          );
-          ctx.lineTo(
-            p.x + Math.cos(p.angle) * (PLAYER_RADIUS + DIRECTION_LINE_LEN),
-            p.y + Math.sin(p.angle) * (PLAYER_RADIUS + DIRECTION_LINE_LEN)
-          );
-          ctx.stroke();
-        }
-
-        // Player name
-        ctx.fillStyle = 'rgba(255,255,255,0.7)';
-        ctx.font = '10px -apple-system, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(p.username, p.x, p.y + PLAYER_RADIUS + 14);
-      }
-
-      ctx.restore();
-    }
-
-    // Crosshair for local player
-    const me = this.players.get(myId);
-    if (me && !me.eliminated) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(this.mouseX, this.mouseY, 8, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(this.mouseX - 12, this.mouseY);
-      ctx.lineTo(this.mouseX + 12, this.mouseY);
-      ctx.moveTo(this.mouseX, this.mouseY - 12);
-      ctx.lineTo(this.mouseX, this.mouseY + 12);
-      ctx.stroke();
-    }
-  }
-
-  _updateScoreboard() {
-    const sb = this.el?.querySelector('#rpjs-arena-scoreboard');
-    if (!sb) return;
-
-    const myId = this.network.myId;
-    let html = '<div style="font-weight:600;margin-bottom:4px;color:rgba(255,255,255,0.9)">Players</div>';
-    const sortedPlayers = Array.from(this.players.entries()).sort((a, b) => {
-      if (a[1].eliminated && !b[1].eliminated) return 1;
-      if (!a[1].eliminated && b[1].eliminated) return -1;
-      return a[1].hitCount - b[1].hitCount;
-    });
-
-    for (const [id, p] of sortedPlayers) {
-      const isMe = id === myId;
-      const hpClass = p.eliminated ? 'hit' : p.hitCount > 0 ? 'hit' : 'alive';
-      const status = p.eliminated ? 'OUT' : p.hitCount > 0 ? 'HURT' : 'OK';
-      html += `<div class="rpjs-arena-scoreboard-row">
-        <span class="rpjs-arena-scoreboard-name">
-          <span style="width:6px;height:6px;border-radius:50%;background:${p.color};display:inline-block"></span>
-          <span style="${isMe ? 'font-weight:600' : ''}">${p.username}</span>
-        </span>
-        <span class="rpjs-arena-scoreboard-hp ${hpClass}">${status}</span>
-      </div>`;
-    }
-
-    sb.innerHTML = html;
-  }
+  _updateHud() { updateArenaHud(this); }
 
   // ---------- Cleanup ----------
 
@@ -1045,6 +873,8 @@ export class ArenaGame {
     }
     this.players.clear();
     this.bullets = [];
+    this.items = [];
+    this.zombies = [];
     this._hitFlashes = [];
     this._sparks = [];
     if (this._onStopCb) this._onStopCb();

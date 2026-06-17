@@ -27,8 +27,8 @@ test.describe('Toolbar Visual Verification', () => {
     expect(boundingBox).toBeTruthy();
 
     // Should be near bottom left
-    expect(boundingBox!.x).toBeLessThan(100);
-    expect(boundingBox!.y).toBeGreaterThan(500);
+    expect(boundingBox.x).toBeLessThan(100);
+    expect(boundingBox.y).toBeGreaterThan(500);
 
     // Verify buttons are clickable
     const chatBtn = page.locator('#rpjs-btn-lobby');

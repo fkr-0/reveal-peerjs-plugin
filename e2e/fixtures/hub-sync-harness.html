@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>RevealPeerJS hub sync harness</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "peerjs": "/e2e/fixtures/peerjs-stub.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <script type="module">
+      import { LobbyNetwork } from '/src/networking.js';
+      import { PongGame } from '/src/pong.js';
+      import { MSG } from '/src/protocol.js';
+
+      window.__rpjsHubSync = { LobbyNetwork, PongGame, MSG };
+    </script>
+  </body>
+</html>

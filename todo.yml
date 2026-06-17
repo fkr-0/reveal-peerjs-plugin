@@ -1,0 +1,180 @@
+meta:
+  project: reveal-peerjs-plugin
+  created_at: 2026-05-30
+  intent: >
+    Backlog from architecture/UX/gameplay review. Tracks bugs, improvements,
+    and future feature ideas for collaboration and engagement.
+
+issues:
+  - id: ISSUE-001
+    priority: high
+    area: networking
+    title: "Lobby ID uses non-cryptographic URL hash with potential collisions"
+    impact: "Different decks can theoretically collide into the same lobby."
+    suggested_fix:
+      - "Switch to a stronger deterministic hash (e.g. SHA-256 of canonical URL)."
+      - "Include optional namespace/project salt."
+
+  - id: ISSUE-002
+    priority: high
+    area: security
+    title: "No trust boundary or abuse controls in peer messages"
+    impact: "Clients can spam inputs/messages and degrade session quality."
+    suggested_fix:
+      - "Rate-limit chat/input/poll events per peer."
+      - "Add host moderation controls (mute, kick, slow mode)."
+
+  - id: ISSUE-003
+    priority: medium
+    area: persistence
+    title: "No host migration when hub disconnects"
+    impact: "Session collapses if first visitor leaves."
+    suggested_fix:
+      - "Elect a new hub from connected peers."
+      - "Reannounce authority and resync state."
+
+  - id: ISSUE-004
+    priority: medium
+    area: accessibility
+    title: "Canvas game mode lacks screen-reader equivalent feedback"
+    impact: "Arena/game status is hard to consume for non-visual users."
+    suggested_fix:
+      - "Add aria-live updates for score/wave/outcomes."
+      - "Add reduced-motion and high-contrast arena rendering toggles."
+
+improvements:
+  - id: IMP-001
+    priority: high
+    area: architecture
+    title: "Complete arena modularization"
+    tasks:
+      - "Move zombie/wave/reward logic into arena-zombie-sim.js."
+      - "Add arena-state schema versioning for forward compatibility."
+      - "Add unit tests for arena sim primitives (damage, pickups, waves)."
+
+  - id: IMP-002
+    priority: high
+    area: testing
+    title: "Strengthen multiplayer reliability tests"
+    tasks:
+      - "Add deterministic two-peer arena sync assertions."
+      - "Add reconnect/disconnect recovery tests."
+      - "Add stress tests for chat, polls, and input flood handling."
+
+  - id: IMP-003
+    priority: medium
+    area: ux
+    title: "Improve discoverability/onboarding"
+    tasks:
+      - "Show first-time guided tooltip tour for toolbar features."
+      - "Add clear hub/participant role explanation in UI."
+      - "Add help panel with keyboard + touch shortcuts."
+
+  - id: IMP-004
+    priority: medium
+    area: observability
+    title: "Add debug telemetry hooks"
+    tasks:
+      - "Expose optional plugin debug panel (peer count, RTT, dropped messages)."
+      - "Emit structured debug events for test instrumentation."
+
+features:
+  voting:
+    - id: FEAT-VOTE-001
+      priority: high
+      title: "Multiple poll modes"
+      details:
+        - "Single choice, multi-select, ranked choice, and Likert scale polls."
+        - "Anonymous vs named mode."
+
+    - id: FEAT-VOTE-002
+      priority: high
+      title: "Live poll lifecycle controls"
+      details:
+        - "Open/close/reopen poll."
+        - "Show partial results during voting toggle."
+        - "Require quorum/threshold for decision polls."
+
+    - id: FEAT-VOTE-003
+      priority: medium
+      title: "Question bank and reusable templates"
+      details:
+        - "Pre-save polls per deck."
+        - "Hot-launch poll from slide notes metadata."
+
+  audience_interaction:
+    - id: FEAT-AUD-001
+      priority: high
+      title: "Raise hand / speaker queue"
+      details:
+        - "Audience can raise/lower hand."
+        - "Hub sees sorted queue and can acknowledge/clear."
+        - "Optional timer per speaker."
+
+    - id: FEAT-AUD-002
+      priority: medium
+      title: "Q&A mode"
+      details:
+        - "Audience submits questions."
+        - "Others can upvote questions."
+        - "Hub can pin answered/active questions."
+
+    - id: FEAT-AUD-003
+      priority: medium
+      title: "Reaction stream"
+      details:
+        - "Quick emoji reactions with rate limits."
+        - "Aggregate sentiment pulse view for presenter."
+
+  content_sharing:
+    - id: FEAT-SHARE-001
+      priority: medium
+      title: "Audience file sharing to host"
+      details:
+        - "Small-file upload relay via hub (size/type restrictions)."
+        - "Consent + safety prompts before download."
+        - "Scan hooks/integration point for external malware scanning."
+
+    - id: FEAT-SHARE-002
+      priority: medium
+      title: "Host handouts / resource distribution"
+      details:
+        - "Hub can publish links/files to all participants."
+        - "Per-slide resource attachments."
+
+    - id: FEAT-SHARE-003
+      priority: low
+      title: "Clipboard-safe snippet sharing"
+      details:
+        - "Share code/text snippets in formatted cards."
+        - "One-click copy with attribution."
+
+  moderation_and_safety:
+    - id: FEAT-MOD-001
+      priority: high
+      title: "Moderation toolkit"
+      details:
+        - "Mute participant chat/reactions."
+        - "Kick/ban for session."
+        - "Message/report audit log for host."
+
+    - id: FEAT-MOD-002
+      priority: medium
+      title: "Permissions model"
+      details:
+        - "Configurable abilities by role: participant/moderator/hub."
+        - "Optional invite token for elevated roles."
+
+roadmap_candidates:
+  near_term:
+    - "Moderation toolkit + rate limiting"
+    - "Raise hand + queue"
+    - "Poll mode expansion (multi-select + anonymous)"
+    - "Hub failover (host migration)"
+  mid_term:
+    - "Q&A board with upvotes"
+    - "File sharing with safety gates"
+    - "Arena unit tests + protocol versioning"
+  long_term:
+    - "Slide-note driven automation (auto-polls, prompts)"
+    - "Session export/analytics (attendance, poll outcomes, engagement)"

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>RevealPeerJS poll harness</title>
+  </head>
+  <body>
+    <script type="module">
+      import { HubMenu } from '/src/hub-menu.js';
+
+      const calls = [];
+      const listeners = new Map();
+
+      const network = {
+        myUser: { username: 'Hub Host' },
+        calls,
+        startPoll(poll) {
+          calls.push({ type: 'startPoll', poll });
+        },
+        sendPollResults(results) {
+          calls.push({ type: 'sendPollResults', results });
+        },
+        on(event, callback) {
+          listeners.set(event, callback);
+        },
+        off(event, callback) {
+          if (listeners.get(event) === callback) listeners.delete(event);
+        },
+      };
+
+      const deck = {
+        getIndices() {
+          return { h: 0, v: 0 };
+        },
+      };
+
+      const hubMenu = new HubMenu(network, deck, () => {});
+      hubMenu.render();
+      hubMenu.show();
+
+      window.__rpjsPollHarness = {
+        hubMenu,
+        network,
+        calls,
+        emit(event, payload) {
+          const callback = listeners.get(event);
+          if (callback) callback(payload);
+        },
+        renderResults(results) {
+          hubMenu._renderPollResults(results);
+        },
+        showResults(poll, entries) {
+          const responses = new Map(entries);
+          hubMenu._showPollResults(poll, responses);
+        },
+      };
+    </script>
+  </body>
+</html>

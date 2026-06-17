@@ -61,8 +61,8 @@ const RevealPeerJS = () => ({
     const toolbar = document.createElement('div');
     toolbar.className = 'rpjs-toolbar';
     toolbar.innerHTML = `
-      <button id="rpjs-btn-lobby" title="Lobby & Chat">${CHAT_ICON}</button>
-      <button id="rpjs-btn-settings" title="Settings">${USER_ICON}</button>
+      <button id="rpjs-btn-lobby" type="button" title="Lobby & Chat" aria-label="Lobby & Chat">${CHAT_ICON}</button>
+      <button id="rpjs-btn-settings" type="button" title="Settings" aria-label="Settings">${USER_ICON}</button>
     `;
     console.log('[RevealPeerJS] Creating toolbar and appending to body...');
     document.body.appendChild(toolbar);
@@ -208,19 +208,27 @@ const RevealPeerJS = () => ({
       const overlay = document.createElement('div');
       overlay.className = 'rpjs-poll-vote-overlay';
 
-      let timeLeft = poll.timeout;
+      const mode = poll.mode || 'single';
+      const selectedAnswers = new Set();
+      const timeout = poll.timeout || 10;
       const startTime = Date.now();
-      const totalTime = poll.timeout * 1000;
+      const totalTime = timeout * 1000;
 
       overlay.innerHTML = `
-        <div class="rpjs-poll-vote-card">
+        <div class="rpjs-poll-vote-card" role="dialog" aria-label="Poll vote">
+          <div class="rpjs-poll-vote-meta">${_escapeHtml(poll.fromUsername || 'Hub')} asks · ${mode === 'multiple' ? 'multiple choice' : 'single choice'}</div>
           <div class="rpjs-poll-vote-question">${_escapeHtml(poll.question)}</div>
+          ${mode === 'multiple' ? '<div class="rpjs-poll-vote-hint">Select every answer that applies, then submit.</div>' : ''}
           <div class="rpjs-poll-vote-options" id="rpjs-vote-options">
-            ${poll.answers.map((a, i) => `
-              <button class="rpjs-poll-vote-option" data-index="${i}">${_escapeHtml(a)}</button>
+            ${poll.answers.map((answer, index) => `
+              <button class="rpjs-poll-vote-option" type="button" data-index="${index}" aria-pressed="false">
+                <span class="rpjs-poll-vote-option-marker">${mode === 'multiple' ? '□' : '•'}</span>
+                <span>${_escapeHtml(answer)}</span>
+              </button>
             `).join('')}
           </div>
-          <div class="rpjs-poll-timer-bar">
+          ${mode === 'multiple' ? '<button class="rpjs-poll-submit-vote" id="rpjs-poll-submit-vote" type="button" disabled>Submit Vote</button>' : ''}
+          <div class="rpjs-poll-timer-bar" aria-hidden="true">
             <div class="rpjs-poll-timer-fill" id="rpjs-timer-fill" style="width:100%"></div>
           </div>
         </div>
@@ -228,60 +236,109 @@ const RevealPeerJS = () => ({
 
       document.body.appendChild(overlay);
 
-      // Timer
+      const close = () => {
+        clearInterval(timerInterval);
+        if (overlay.parentNode) overlay.remove();
+      };
+
+      const submitMultipleVote = () => {
+        if (selectedAnswers.size === 0) return;
+        network.answerPoll(poll.pollId, [...selectedAnswers]);
+        close();
+      };
+
+      const updateSubmitState = () => {
+        const submit = overlay.querySelector('#rpjs-poll-submit-vote');
+        if (submit) submit.disabled = selectedAnswers.size === 0;
+      };
+
       const timerInterval = setInterval(() => {
         const elapsed = Date.now() - startTime;
         const remaining = Math.max(0, 1 - elapsed / totalTime);
         const fill = overlay.querySelector('#rpjs-timer-fill');
         if (fill) fill.style.width = `${remaining * 100}%`;
 
-        if (elapsed >= totalTime) {
-          clearInterval(timerInterval);
-          overlay.remove();
-        }
+        if (elapsed >= totalTime) close();
       }, 50);
 
-      // Vote option click
       overlay.querySelectorAll('.rpjs-poll-vote-option').forEach(btn => {
         btn.addEventListener('click', () => {
           const index = parseInt(btn.getAttribute('data-index'));
           const answer = poll.answers[index];
-          network.answerPoll(poll.pollId, answer);
-          clearInterval(timerInterval);
-          overlay.remove();
+
+          if (mode !== 'multiple') {
+            network.answerPoll(poll.pollId, answer);
+            close();
+            return;
+          }
+
+          if (selectedAnswers.has(answer)) {
+            selectedAnswers.delete(answer);
+            btn.classList.remove('rpjs-selected');
+            btn.setAttribute('aria-pressed', 'false');
+            const marker = btn.querySelector('.rpjs-poll-vote-option-marker');
+            if (marker) marker.textContent = '□';
+          } else {
+            selectedAnswers.add(answer);
+            btn.classList.add('rpjs-selected');
+            btn.setAttribute('aria-pressed', 'true');
+            const marker = btn.querySelector('.rpjs-poll-vote-option-marker');
+            if (marker) marker.textContent = '☑';
+          }
+          updateSubmitState();
         });
       });
 
-      // Auto close after timeout + buffer
-      setTimeout(() => {
-        clearInterval(timerInterval);
-        if (overlay.parentNode) overlay.remove();
-      }, (poll.timeout + 1) * 1000);
+      const submit = overlay.querySelector('#rpjs-poll-submit-vote');
+      if (submit) submit.addEventListener('click', submitMultipleVote);
+
+      setTimeout(close, (timeout + 1) * 1000);
     }
 
     function _showPollResults(results) {
       const overlay = document.createElement('div');
       overlay.className = 'rpjs-modal-overlay';
 
+      const totalResponses = results.totalResponses || 0;
+      const totalSelections = results.totalSelections ?? results.answers.reduce((sum, answer) => sum + (answer.count || 0), 0);
+      const mode = results.mode || 'single';
+      const summaryParts = [
+        `${totalResponses} voter${totalResponses === 1 ? '' : 's'}`,
+        `${totalSelections} selection${totalSelections === 1 ? '' : 's'}`,
+      ];
+      if (mode === 'multiple') summaryParts.push('multiple choice');
+
+      const renderResultRow = (answer, index) => {
+        const count = answer.count || 0;
+        const percentage = Math.max(0, Math.min(100, answer.percentage || 0));
+        const rank = answer.rank || index + 1;
+        const isWinner = Boolean(answer.isWinner);
+        return `
+          <div class="rpjs-poll-result-row" data-leading="${isWinner ? 'true' : 'false'}">
+            <div class="rpjs-poll-result-heading">
+              <span class="rpjs-poll-result-rank">#${rank}</span>
+              <span class="rpjs-poll-result-text">${_escapeHtml(answer.text)}</span>
+              ${isWinner ? '<span class="rpjs-poll-result-winner">Top choice</span>' : ''}
+            </div>
+            <div class="rpjs-poll-result-meta">${count} vote${count === 1 ? '' : 's'} · ${percentage}%</div>
+            <div class="rpjs-poll-result-bar-bg" role="presentation">
+              <div class="rpjs-poll-result-bar-fill" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percentage}" style="width:${percentage}%"></div>
+            </div>
+          </div>
+        `;
+      };
+
       overlay.innerHTML = `
-        <div class="rpjs-modal rpjs-poll-results-card">
+        <div class="rpjs-modal rpjs-poll-results-card" role="dialog" aria-label="Poll results">
           <div class="rpjs-modal-title">
             <span>Poll Results</span>
-            <button class="rpjs-modal-close" id="rpjs-vresults-close">&times;</button>
+            <button class="rpjs-modal-close" id="rpjs-vresults-close" type="button" aria-label="Close poll results">&times;</button>
           </div>
-          <div style="margin-bottom:12px;font-size:14px;color:rgba(255,255,255,0.7)">${_escapeHtml(results.question)}</div>
-          <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:12px">${results.totalResponses} response${results.totalResponses !== 1 ? 's' : ''}</div>
-          ${results.answers.map(a => `
-            <div class="rpjs-poll-result-row">
-              <div class="rpjs-poll-result-label">
-                <span>${_escapeHtml(a.text)}</span>
-                <span>${a.count} (${a.percentage}%)</span>
-              </div>
-              <div class="rpjs-poll-result-bar-bg">
-                <div class="rpjs-poll-result-bar-fill" style="width:${a.percentage}%"></div>
-              </div>
-            </div>
-          `).join('')}
+          <div class="rpjs-poll-results-question">${_escapeHtml(results.question)}</div>
+          <div class="rpjs-poll-results-summary">${summaryParts.join(' · ')}</div>
+          <div class="rpjs-poll-results-list">
+            ${results.answers.map(renderResultRow).join('')}
+          </div>
         </div>
       `;
 
