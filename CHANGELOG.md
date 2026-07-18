@@ -5,6 +5,41 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-07-18
+
+### Added
+
+- A shared UI design system with explicit surface, text, border, focus, state, spacing, radius, and control-size tokens.
+- Reusable modal behavior for focus trapping, Escape and backdrop dismissal, initial focus, and trigger-focus restoration.
+- Visible connection status text, participant counts, empty chat guidance, setting descriptions, inline validation, and Hub-action descriptions.
+- Keyboard-operable message-target and participant-action menus with arrow-key navigation, Escape handling, and visible action affordances.
+- Reduced-motion, forced-colors, high-contrast, safe-area, and compact mobile layout support.
+- A self-contained `pnpm test:ui-audit` command for desktop/mobile viewport, target-size, accessible-name, and containment checks.
+- Ten dedicated UI-quality regression tests covering target sizes, modal conventions, staged settings, menu navigation, contrast, mobile bounds, and motion preferences.
+
+### Changed
+
+- Standardized primary controls around 44px minimum targets, strong focus-visible rings, consistent typography, and familiar primary/secondary button hierarchy.
+- Settings now stage edits until **Save & Apply** instead of changing network, theme, or accessibility state immediately.
+- User colors are retained as identity markers while usernames remain neutral, readable text rather than inheriting arbitrary low-contrast colors.
+- Initial identity colors are collision-resistant: the Hub assigns the next available palette color when a joining participant requests a marker already in use.
+- Chat submission now uses native form behavior, disables empty sends, and exposes messages through a polite live log.
+- Poll creation disables publishing until a question and two answers exist, and voting timers expose progress semantics.
+- Hub controls behave as a dismissible popover with explicit expanded state and predictable focus return.
+- Split structural component CSS from the reusable visual/accessibility layer in `styles-system.js`.
+- Replaced fixed-delay multiplayer tests with isolated rooms and condition-based connection waits.
+- Separated public PeerJS signaling checks into `pnpm test:live-peerjs` so the default release matrix remains hermetic.
+
+### Fixed
+
+- Prevented delayed chat-input autofocus from stealing focus after keyboard users opened another control in Firefox.
+- Prevented the Hub popover from immediately closing when reopened from its trigger.
+- Prevented desktop drag coordinates from escaping mobile safe-area layout constraints.
+- Prevented visual-preference changes from being blocked by an unrelated blank display-name field during slow profile initialization.
+- Replaced an outdated opaque-button visual assertion with an actual icon-to-surface contrast check.
+- Escaped participant identifiers and labels consistently in attribute contexts.
+- Prevented default-profile participants from appearing with indistinguishable identity markers.
+
 ## [1.3.0] - 2026-07-18
 
 ### Added

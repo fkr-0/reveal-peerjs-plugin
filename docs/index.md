@@ -45,6 +45,10 @@ pnpm dev-server
 
 Then open `http://localhost:8080/example/` in two windows to see lobby, chat, hub controls, and games in action.
 
+## UI and Accessibility 1.4
+
+The 1.4 interface uses a shared design system with 44px primary targets, explicit focus-visible treatment, staged settings, readable identity markers, keyboard-complete menus and dialogs, and safe-area-aware mobile layouts. Reduced motion, forced colors, and enhanced contrast are supported, while `pnpm test:ui-audit` provides a standalone desktop/mobile quality check.
+
 ## Arena 1.2
 
 Select one of five Arena characters in Settings, then launch a Hub-authoritative multiplayer round or solo zombie survival session. Arena 1.2 adds weighted healing, armor, weapon, HASTE, AMP, MAGNET, and REGEN pickups; dynamic character stats and collision sizes; effect indicators; and an in-game item legend.

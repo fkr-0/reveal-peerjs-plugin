@@ -21,6 +21,7 @@ import { HubMenu } from './hub-menu.js';
 import { PongGame } from './pong.js';
 import { ArenaGame } from './arena-game.js';
 import { CHAT_ICON, USER_ICON, HUB_ICON } from './icons.js';
+import { activateModal, setExpanded } from './ui-a11y.js';
 
 const RevealPeerJS = () => ({
   id: 'peerjs',
@@ -58,24 +59,33 @@ const RevealPeerJS = () => ({
     // ========== Toolbar ==========
     const toolbar = document.createElement('div');
     toolbar.className = 'rpjs-toolbar';
+    toolbar.setAttribute('role', 'toolbar');
+    toolbar.setAttribute('aria-label', 'Collaboration tools');
     toolbar.innerHTML = `
-      <button id="rpjs-btn-lobby" type="button" title="Lobby & Chat" aria-label="Lobby & Chat">${CHAT_ICON}</button>
-      <button id="rpjs-btn-settings" type="button" title="Settings" aria-label="Settings">${USER_ICON}</button>
+      <button id="rpjs-btn-lobby" type="button" title="Lobby & Chat" aria-label="Lobby & Chat"
+              aria-controls="rpjs-lobby-panel" aria-expanded="false">${CHAT_ICON}</button>
+      <button id="rpjs-btn-settings" type="button" title="Settings" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false">${USER_ICON}</button>
     `;
     document.body.appendChild(toolbar);
 
     // ========== Toolbar button events ==========
     document.getElementById('rpjs-btn-lobby').addEventListener('click', () => {
       if (!lobbyPanel) {
-        lobbyPanel = new LobbyPanel(network, settings);
+        lobbyPanel = new LobbyPanel(network, settings, (visible) => {
+          const button = document.getElementById('rpjs-btn-lobby');
+          setExpanded(button, visible);
+          if (!visible) button?.focus();
+        });
       }
       lobbyPanel.toggle();
-      document.getElementById('rpjs-btn-lobby').classList.toggle('rpjs-active', lobbyPanel.isVisible());
     });
 
     network.on('pong-end', (payload) => {
       document.querySelectorAll('.rpjs-pong-invite-overlay').forEach((overlay) => {
-        if (overlay.dataset.gameId === payload.gameId) overlay.remove();
+        if (overlay.dataset.gameId === payload.gameId) {
+          if (typeof overlay._rpjsClose === 'function') overlay._rpjsClose();
+          else overlay.remove();
+        }
       });
     });
 
@@ -94,6 +104,8 @@ const RevealPeerJS = () => ({
       if (!settingsModal) {
         settingsModal = new SettingsModal(network, settings, (newSettings) => {
           Object.assign(settings, newSettings);
+        }, (visible) => {
+          setExpanded(document.getElementById('rpjs-btn-settings'), visible);
         });
       }
       settingsModal.show();
@@ -104,17 +116,26 @@ const RevealPeerJS = () => ({
       // Update status dot
       const dot = document.getElementById('rpjs-status-dot');
       if (dot) dot.classList.remove('rpjs-connecting', 'rpjs-offline');
+      const status = document.getElementById('rpjs-status-label');
+      if (status) status.textContent = 'Connected';
 
       // If hub, show hub button
       if (isHub) {
         const hubBtn = document.createElement('button');
         hubBtn.id = 'rpjs-btn-hub';
         hubBtn.className = 'rpjs-hub-btn';
+        hubBtn.type = 'button';
         hubBtn.title = 'Hub Controls';
+        hubBtn.setAttribute('aria-label', 'Hub Controls');
+        hubBtn.setAttribute('aria-controls', 'rpjs-hub-menu');
+        hubBtn.setAttribute('aria-expanded', 'false');
         hubBtn.innerHTML = HUB_ICON;
         hubBtn.addEventListener('click', () => {
           if (!hubMenu) {
-            hubMenu = new HubMenu(network, deck, launchArena);
+            hubMenu = new HubMenu(network, deck, launchArena, (visible, restoreFocus = true) => {
+              setExpanded(hubBtn, visible);
+              if (!visible && restoreFocus) hubBtn.focus();
+            });
           }
           hubMenu.toggle();
         });
@@ -126,6 +147,8 @@ const RevealPeerJS = () => ({
       console.error('[RevealPeerJS] Error:', err);
       const dot = document.getElementById('rpjs-status-dot');
       if (dot) dot.classList.add('rpjs-offline');
+      const status = document.getElementById('rpjs-status-label');
+      if (status) status.textContent = 'Offline';
     });
 
     // ========== Network event handlers ==========
@@ -222,10 +245,11 @@ const RevealPeerJS = () => ({
       const totalTime = timeout * 1000;
 
       overlay.innerHTML = `
-        <div class="rpjs-poll-vote-card" role="dialog" aria-label="Poll vote">
-          <div class="rpjs-poll-vote-meta">${_escapeHtml(poll.fromUsername || 'Hub')} asks · ${mode === 'multiple' ? 'multiple choice' : 'single choice'}</div>
-          <div class="rpjs-poll-vote-question">${_escapeHtml(poll.question)}</div>
-          ${mode === 'multiple' ? '<div class="rpjs-poll-vote-hint">Select every answer that applies, then submit.</div>' : ''}
+        <div class="rpjs-poll-vote-card" role="dialog" aria-modal="true"
+             aria-labelledby="rpjs-poll-vote-question" aria-describedby="rpjs-poll-vote-meta rpjs-poll-vote-hint">
+          <div class="rpjs-poll-vote-meta" id="rpjs-poll-vote-meta">${_escapeHtml(poll.fromUsername || 'Hub')} asks · ${mode === 'multiple' ? 'multiple choice' : 'single choice'}</div>
+          <h2 class="rpjs-poll-vote-question" id="rpjs-poll-vote-question">${_escapeHtml(poll.question)}</h2>
+          <div class="rpjs-poll-vote-hint" id="rpjs-poll-vote-hint">${mode === 'multiple' ? 'Select every answer that applies, then submit.' : 'Choose one answer.'}</div>
           <div class="rpjs-poll-vote-options" id="rpjs-vote-options">
             ${poll.answers.map((answer, index) => `
               <button class="rpjs-poll-vote-option" type="button" data-index="${index}" aria-pressed="false">
@@ -235,18 +259,28 @@ const RevealPeerJS = () => ({
             `).join('')}
           </div>
           ${mode === 'multiple' ? '<button class="rpjs-poll-submit-vote" id="rpjs-poll-submit-vote" type="button" disabled>Submit Vote</button>' : ''}
-          <div class="rpjs-poll-timer-bar" aria-hidden="true">
+          <div class="rpjs-poll-timer-bar" role="progressbar" aria-label="Voting time remaining"
+               aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
             <div class="rpjs-poll-timer-fill" id="rpjs-timer-fill" style="width:100%"></div>
           </div>
         </div>
       `;
 
       document.body.appendChild(overlay);
+      let deactivate = null;
+      let autoCloseTimer = null;
 
       const close = () => {
         clearInterval(timerInterval);
+        clearTimeout(autoCloseTimer);
+        deactivate?.();
+        deactivate = null;
         if (overlay.parentNode) overlay.remove();
       };
+      deactivate = activateModal(overlay, {
+        initialFocus: '.rpjs-poll-vote-option',
+        onRequestClose: close,
+      });
 
       const submitMultipleVote = () => {
         if (selectedAnswers.size === 0) return;
@@ -264,6 +298,8 @@ const RevealPeerJS = () => ({
         const remaining = Math.max(0, 1 - elapsed / totalTime);
         const fill = overlay.querySelector('#rpjs-timer-fill');
         if (fill) fill.style.width = `${remaining * 100}%`;
+        const timer = overlay.querySelector('.rpjs-poll-timer-bar');
+        if (timer) timer.setAttribute('aria-valuenow', String(Math.round(remaining * 100)));
 
         if (elapsed >= totalTime) close();
       }, 50);
@@ -299,7 +335,7 @@ const RevealPeerJS = () => ({
       const submit = overlay.querySelector('#rpjs-poll-submit-vote');
       if (submit) submit.addEventListener('click', submitMultipleVote);
 
-      setTimeout(close, (timeout + 1) * 1000);
+      autoCloseTimer = setTimeout(close, (timeout + 1) * 1000);
     }
 
     function _showPollResults(results) {
@@ -336,9 +372,9 @@ const RevealPeerJS = () => ({
       };
 
       overlay.innerHTML = `
-        <div class="rpjs-modal rpjs-poll-results-card" role="dialog" aria-label="Poll results">
+        <div class="rpjs-modal rpjs-poll-results-card" role="dialog" aria-modal="true" aria-labelledby="rpjs-visitor-results-title">
           <div class="rpjs-modal-title">
-            <span>Poll Results</span>
+            <h2 id="rpjs-visitor-results-title">Poll Results</h2>
             <button class="rpjs-modal-close" id="rpjs-vresults-close" type="button" aria-label="Close poll results">&times;</button>
           </div>
           <div class="rpjs-poll-results-question">${_escapeHtml(results.question)}</div>
@@ -350,15 +386,20 @@ const RevealPeerJS = () => ({
       `;
 
       document.body.appendChild(overlay);
-
-      overlay.querySelector('#rpjs-vresults-close').addEventListener('click', () => overlay.remove());
-      overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) overlay.remove();
+      let deactivate = null;
+      let autoCloseTimer = null;
+      const close = () => {
+        clearTimeout(autoCloseTimer);
+        deactivate?.();
+        deactivate = null;
+        overlay.remove();
+      };
+      deactivate = activateModal(overlay, {
+        initialFocus: '#rpjs-vresults-close',
+        onRequestClose: close,
       });
-
-      setTimeout(() => {
-        if (overlay.parentNode) overlay.remove();
-      }, 15000);
+      overlay.querySelector('#rpjs-vresults-close').addEventListener('click', close);
+      autoCloseTimer = setTimeout(close, 15000);
     }
 
     function _showPongInvite(payload) {
@@ -367,22 +408,38 @@ const RevealPeerJS = () => ({
       overlay.dataset.gameId = payload.gameId;
 
       overlay.innerHTML = `
-        <div class="rpjs-modal" style="text-align:center">
-          <div class="rpjs-modal-title" style="justify-content:center">
-            <span>Pong Challenge!</span>
+        <div class="rpjs-modal rpjs-confirm-dialog" role="alertdialog" aria-modal="true"
+             aria-labelledby="rpjs-pong-invite-title" aria-describedby="rpjs-pong-invite-description">
+          <div class="rpjs-modal-title rpjs-modal-title-centered">
+            <h2 id="rpjs-pong-invite-title">Pong Challenge</h2>
           </div>
-          <p style="color:rgba(255,255,255,0.7);margin-bottom:16px">${_escapeHtml(payload.fromUsername)} challenges you to a game of Pong!</p>
-          <div style="display:flex;gap:10px;justify-content:center">
-            <button id="rpjs-pong-accept" style="padding:8px 20px;background:rgba(76,175,80,0.5);border:none;border-radius:8px;color:#fff;cursor:pointer;font-size:14px;font-family:inherit">Accept</button>
-            <button id="rpjs-pong-decline" style="padding:8px 20px;background:rgba(244,67,54,0.3);border:none;border-radius:8px;color:#ef5350;cursor:pointer;font-size:14px;font-family:inherit">Decline</button>
+          <p class="rpjs-confirm-message" id="rpjs-pong-invite-description">${_escapeHtml(payload.fromUsername)} invited you to play Pong.</p>
+          <div class="rpjs-confirm-actions">
+            <button class="rpjs-secondary-btn" id="rpjs-pong-decline" type="button">Decline</button>
+            <button class="rpjs-primary-btn" id="rpjs-pong-accept" type="button">Accept challenge</button>
           </div>
         </div>
       `;
 
       document.body.appendChild(overlay);
+      let deactivate = null;
+      const close = () => {
+        deactivate?.();
+        deactivate = null;
+        overlay.remove();
+      };
+      overlay._rpjsClose = close;
+      deactivate = activateModal(overlay, {
+        initialFocus: '#rpjs-pong-accept',
+        onRequestClose: () => {
+          close();
+          network.respondToPongInvite(payload, false);
+        },
+        closeOnBackdrop: false,
+      });
 
       overlay.querySelector('#rpjs-pong-accept').addEventListener('click', () => {
-        overlay.remove();
+        close();
         network.respondToPongInvite(payload, true);
         pongGame = new PongGame(network, false, payload.from, {
           ...gameCallbacks,
@@ -392,7 +449,7 @@ const RevealPeerJS = () => ({
       });
 
       overlay.querySelector('#rpjs-pong-decline').addEventListener('click', () => {
-        overlay.remove();
+        close();
         network.respondToPongInvite(payload, false);
       });
     }

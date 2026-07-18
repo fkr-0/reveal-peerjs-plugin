@@ -2,6 +2,8 @@
  * CSS styles for the plugin UI
  */
 
+import { UI_SYSTEM_STYLES } from './styles-system.js';
+
 export const STYLES_ID = 'reveal-peerjs-styles';
 
 export function injectStyles() {
@@ -1512,6 +1514,8 @@ export function injectStyles() {
       min-width: 44px;
       min-height: 44px;
     }
+
+    ${UI_SYSTEM_STYLES}
   `;
 
   document.head.appendChild(style);

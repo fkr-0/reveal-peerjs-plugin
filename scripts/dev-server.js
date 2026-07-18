@@ -18,7 +18,10 @@ const __dirname = dirname(__filename);
 const rootDir = join(__dirname, '..');
 const watchMode = !process.argv.includes('--no-watch');
 
-const PORT = 8080;
+const requestedPort = Number(process.env.PORT || 8080);
+const PORT = Number.isInteger(requestedPort) && requestedPort > 0 && requestedPort <= 65535
+  ? requestedPort
+  : 8080;
 const MIME_TYPES = {
   '.html': 'text/html',
   '.js': 'text/javascript',

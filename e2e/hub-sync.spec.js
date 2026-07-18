@@ -6,6 +6,41 @@ async function loadHarness(page) {
 }
 
 test.describe('Hub-based game synchronization', () => {
+  test('hub assigns a distinct initial identity color when the requested color is already in use', async ({ page }) => {
+    await loadHarness(page);
+
+    const result = await page.evaluate(() => {
+      const { LobbyNetwork, MSG } = window.__rpjsHubSync;
+      const hub = new LobbyNetwork();
+      const sent = [];
+      hub.isHub = true;
+      hub.myId = 'hub';
+      hub.myUser = { id: 'hub', username: 'Hub', color: '#4fc3f7', isHub: true, number: 0 };
+      hub.users.set('hub', { ...hub.myUser, conn: null });
+      const connection = { peer: 'visitor-a', send: message => sent.push(message) };
+
+      hub._handleHubMessage({
+        type: MSG.JOIN,
+        payload: {
+          username: 'Visitor',
+          color: '#4fc3f7',
+          arenaCharacter: 'vanguard',
+        },
+      }, connection);
+
+      const visitor = hub.users.get('visitor-a');
+      const welcome = sent.find(message => message.type === MSG.USER_LIST);
+      return {
+        hubColor: hub.myUser.color,
+        visitorColor: visitor.color,
+        assignedColor: welcome?.payload?.yourAssignedColor,
+      };
+    });
+
+    expect(result.visitorColor).not.toBe(result.hubColor);
+    expect(result.assignedColor).toBe(result.visitorColor);
+  });
+
   test('hub consumes arena input without rebroadcasting visitor commands', async ({ page }) => {
     await loadHarness(page);
 

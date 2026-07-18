@@ -15,7 +15,7 @@ function collectJavaScriptFiles(directory, files = []) {
     const stats = statSync(path);
     if (stats.isDirectory()) {
       if (!ignoredDirectories.has(entry)) collectJavaScriptFiles(path, files);
-    } else if (entry.endsWith('.js')) {
+    } else if (entry.endsWith('.js') || entry.endsWith('.mjs')) {
       files.push(path);
     }
   }

@@ -114,14 +114,31 @@ test.describe('Toolbar Visual Verification', () => {
 
     const chatBtn = page.locator('#rpjs-btn-lobby');
 
-    // Check button has visible background
-    const backgroundColor = await chatBtn.evaluate((el) => {
-      return window.getComputedStyle(el).backgroundColor;
+    const contrast = await chatBtn.evaluate((el) => {
+      const parse = value => {
+        const values = value.match(/[\d.]+/g).map(Number);
+        return { rgb: values.slice(0, 3), alpha: values.length > 3 ? values[3] : 1 };
+      };
+      const composite = (front, back) => front.rgb.map((channel, index) => (
+        channel * front.alpha + back[index] * (1 - front.alpha)
+      ));
+      const luminance = rgb => {
+        const channels = rgb.map(value => {
+          const normalized = value / 255;
+          return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+      };
+
+      const foreground = parse(getComputedStyle(el).color).rgb;
+      const pageBackground = parse(getComputedStyle(document.body).backgroundColor).rgb;
+      const toolbarBackground = composite(parse(getComputedStyle(el.closest('.rpjs-toolbar')).backgroundColor), pageBackground);
+      const values = [luminance(foreground), luminance(toolbarBackground)].sort((a, b) => b - a);
+      return (values[0] + 0.05) / (values[1] + 0.05);
     });
 
-    // Should have some background color (not transparent)
-    expect(backgroundColor).not.toBe('transparent');
-    expect(backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+    // Icon controls need at least 3:1 non-text contrast against their toolbar surface.
+    expect(contrast).toBeGreaterThanOrEqual(3);
   });
 
   test('toolbar works with Reveal.js fullscreen', async ({ page }) => {

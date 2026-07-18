@@ -101,8 +101,7 @@ test.describe('Lobby Panel', () => {
 
     // Should have at least one user (current user)
     const users = panel.locator('.rpjs-user-item');
-    const count = await users.count();
-    expect(count).toBeGreaterThanOrEqual(1);
+    await expect.poll(() => users.count(), { timeout: 15000 }).toBeGreaterThanOrEqual(1);
   });
 
   test('should allow sending chat messages', async ({ page }) => {
@@ -198,8 +197,8 @@ test.describe('Settings Modal', () => {
     const modal = page.locator('.rpjs-modal');
     await expect(modal).toBeVisible();
 
-    // Find dark mode toggle by its accessible switch name.
-    const darkModeToggle = modal.getByRole('switch', { name: /dark mode/i });
+    // Find the presentation-theme toggle by its accessible switch name.
+    const darkModeToggle = modal.getByRole('switch', { name: /darken presentation/i });
     await darkModeToggle.click();
 
     // Save settings

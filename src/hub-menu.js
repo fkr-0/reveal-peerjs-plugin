@@ -3,15 +3,21 @@
  */
 
 import { HUB_ICON, JUMP_ICON, FOLLOW_ICON, POLL_ICON, ARENA_ICON, CLOSE_ICON } from './icons.js';
+import { activateModal } from './ui-a11y.js';
 
 export class HubMenu {
-  constructor(network, deck, onLaunchArena) {
+  constructor(network, deck, onLaunchArena, onVisibilityChange = null) {
     this.network = network;
     this.deck = deck;
     this.onLaunchArena = onLaunchArena;
+    this.onVisibilityChange = onVisibilityChange;
     this.el = null;
     this.followActive = false;
     this._pollModal = null;
+    this._deactivatePollModal = null;
+    this._keyHandler = null;
+    this._outsideClickHandler = null;
+    this._outsideClickTimer = null;
   }
 
   render() {
@@ -19,26 +25,41 @@ export class HubMenu {
 
     this.el = document.createElement('div');
     this.el.className = 'rpjs-hub-menu';
+    this.el.id = 'rpjs-hub-menu';
+    this.el.setAttribute('role', 'group');
+    this.el.setAttribute('aria-labelledby', 'rpjs-hub-menu-title');
     this.el.innerHTML = `
-      <div class="rpjs-hub-menu-title">Hub Controls</div>
+      <h2 class="rpjs-hub-menu-title" id="rpjs-hub-menu-title">Hub Controls</h2>
       <button class="rpjs-hub-menu-item" id="rpjs-hub-jump" type="button">
         <span class="rpjs-hub-menu-icon">${JUMP_ICON}</span>
-        <span class="rpjs-hub-menu-label">Jump All to Current Slide</span>
+        <span class="rpjs-hub-menu-copy">
+          <span class="rpjs-hub-menu-label">Jump All to Current Slide</span>
+          <span class="rpjs-hub-menu-description">Bring everyone to this slide once.</span>
+        </span>
       </button>
       <button class="rpjs-hub-menu-item" id="rpjs-hub-follow" type="button" aria-pressed="${this.followActive ? 'true' : 'false'}">
         <span class="rpjs-hub-menu-icon">${FOLLOW_ICON}</span>
-        <span class="rpjs-hub-menu-label">Follow Mode</span>
+        <span class="rpjs-hub-menu-copy">
+          <span class="rpjs-hub-menu-label">Follow Mode</span>
+          <span class="rpjs-hub-menu-description">Keep everyone synced as you navigate.</span>
+        </span>
         <span class="rpjs-hub-menu-status ${this.followActive ? 'rpjs-on' : ''}" id="rpjs-follow-status">
           ${this.followActive ? 'ON' : 'OFF'}
         </span>
       </button>
       <button class="rpjs-hub-menu-item" id="rpjs-hub-poll" type="button">
         <span class="rpjs-hub-menu-icon">${POLL_ICON}</span>
-        <span class="rpjs-hub-menu-label">Launch Poll</span>
+        <span class="rpjs-hub-menu-copy">
+          <span class="rpjs-hub-menu-label">Launch Poll</span>
+          <span class="rpjs-hub-menu-description">Ask a timed question and share results.</span>
+        </span>
       </button>
       <button class="rpjs-hub-menu-item" id="rpjs-hub-arena" type="button">
         <span class="rpjs-hub-menu-icon">${ARENA_ICON}</span>
-        <span class="rpjs-hub-menu-label">Launch Arena</span>
+        <span class="rpjs-hub-menu-copy">
+          <span class="rpjs-hub-menu-label">Launch Arena</span>
+          <span class="rpjs-hub-menu-description">Start a game for everyone in the lobby.</span>
+        </span>
       </button>
     `;
 
@@ -76,8 +97,27 @@ export class HubMenu {
       if (this.onLaunchArena) {
         this.onLaunchArena();
       }
-      this.hide();
+      this.hide(false);
     });
+
+    this._keyHandler = (event) => {
+      if (event.key === 'Escape' && this.el?.style.display !== 'none' && !this._pollModal) {
+        event.preventDefault();
+        this.hide(true);
+      }
+    };
+    this.el.addEventListener('keydown', this._keyHandler);
+
+    this._outsideClickHandler = (event) => {
+      if (event.target.closest?.('#rpjs-btn-hub')) return;
+      if (this.el?.style.display !== 'none' && !this.el.contains(event.target) && !this._pollModal) {
+        this.hide(false);
+      }
+    };
+    this._outsideClickTimer = setTimeout(() => {
+      this._outsideClickTimer = null;
+      document.addEventListener('click', this._outsideClickHandler);
+    }, 0);
   }
 
   _flashItem(id) {
@@ -101,20 +141,23 @@ export class HubMenu {
       return ans.map((a, i) => `
         <div class="rpjs-poll-answer-row">
           <input type="text" class="rpjs-poll-answer-input"
-                 data-index="${i}" placeholder="Answer ${i + 1}" value="${this._escapeAttr(a)}">
-          ${ans.length > 2 ? `<button class="rpjs-poll-remove-btn" data-remove="${i}" aria-label="Remove answer ${i + 1}">&times;</button>` : ''}
+                 data-index="${i}" placeholder="Answer ${i + 1}" value="${this._escapeAttr(a)}"
+                 aria-label="Answer ${i + 1}" autocomplete="off">
+          ${ans.length > 2 ? `<button class="rpjs-poll-remove-btn" type="button" data-remove="${i}" aria-label="Remove answer ${i + 1}">&times;</button>` : ''}
         </div>
       `).join('');
     };
 
     overlay.innerHTML = `
-      <div class="rpjs-modal rpjs-poll-modal">
+      <div class="rpjs-modal rpjs-poll-modal" role="dialog" aria-modal="true" aria-labelledby="rpjs-poll-title" aria-describedby="rpjs-poll-error">
         <div class="rpjs-modal-title">
-          <span>Create Poll</span>
+          <h2 id="rpjs-poll-title">Create Poll</h2>
           <button class="rpjs-modal-close" id="rpjs-poll-close" type="button" aria-label="Close poll creator">${CLOSE_ICON}</button>
         </div>
+        <label class="rpjs-field-label" for="rpjs-poll-question">Question</label>
         <input type="text" class="rpjs-poll-question-input" id="rpjs-poll-question"
-               placeholder="Enter your question..." maxlength="200">
+               placeholder="What would you like to ask?" maxlength="200" autocomplete="off">
+        <div class="rpjs-field-label" id="rpjs-poll-answers-label">Answers</div>
         <div class="rpjs-poll-answers" id="rpjs-poll-answers">
           ${renderAnswers(answers)}
         </div>
@@ -138,21 +181,22 @@ export class HubMenu {
             <span>Share results with visitors</span>
           </label>
         </div>
-        <button class="rpjs-poll-publish-btn" id="rpjs-poll-publish" type="button">Publish Poll</button>
+        <div class="rpjs-field-error" id="rpjs-poll-error" role="alert" aria-live="polite"></div>
+        <button class="rpjs-poll-publish-btn" id="rpjs-poll-publish" type="button" disabled>Publish Poll</button>
       </div>
     `;
 
     document.body.appendChild(overlay);
     this._pollModal = overlay;
+    this._deactivatePollModal = activateModal(overlay, {
+      initialFocus: '#rpjs-poll-question',
+      onRequestClose: () => this._closePollModal(),
+    });
 
     // Close
     overlay.querySelector('#rpjs-poll-close').addEventListener('click', () => {
       this._closePollModal();
     });
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) this._closePollModal();
-    });
-
     // Sync answer inputs
     const syncInputs = () => {
       const inputs = overlay.querySelectorAll('.rpjs-poll-answer-input');
@@ -161,6 +205,15 @@ export class HubMenu {
         if (!isNaN(idx)) answers[idx] = input.value;
       });
     };
+    const updatePublishState = () => {
+      syncInputs();
+      const question = overlay.querySelector('#rpjs-poll-question').value.trim();
+      const validAnswers = answers.map(answer => answer.trim()).filter(Boolean);
+      const publish = overlay.querySelector('#rpjs-poll-publish');
+      publish.disabled = !question || validAnswers.length < 2;
+      if (!publish.disabled) overlay.querySelector('#rpjs-poll-error').textContent = '';
+    };
+    overlay.addEventListener('input', updatePublishState);
 
     // Remove answer
     overlay.addEventListener('click', (e) => {
@@ -169,6 +222,7 @@ export class HubMenu {
         const idx = parseInt(e.target.getAttribute('data-remove'));
         answers.splice(idx, 1);
         overlay.querySelector('.rpjs-poll-answers').innerHTML = renderAnswers(answers);
+        updatePublishState();
       }
     });
 
@@ -178,6 +232,7 @@ export class HubMenu {
       if (answers.length < 8) {
         answers.push('');
         overlay.querySelector('.rpjs-poll-answers').innerHTML = renderAnswers(answers);
+        updatePublishState();
       }
     });
 
@@ -190,7 +245,10 @@ export class HubMenu {
       const mode = overlay.querySelector('#rpjs-poll-mode-multiple').checked ? 'multiple' : 'single';
       const shareResults = overlay.querySelector('#rpjs-poll-share-results').checked;
 
-      if (!question || validAnswers.length < 2) return;
+      if (!question || validAnswers.length < 2) {
+        overlay.querySelector('#rpjs-poll-error').textContent = 'Add a question and at least two answers.';
+        return;
+      }
 
       const pollId = `poll-${Date.now()}`;
       const poll = {
@@ -319,9 +377,9 @@ export class HubMenu {
     if (mode === 'multiple') summaryParts.push('multiple choice');
 
     overlay.innerHTML = `
-      <div class="rpjs-modal rpjs-poll-results-card" role="dialog" aria-label="Poll results">
+      <div class="rpjs-modal rpjs-poll-results-card" role="dialog" aria-modal="true" aria-labelledby="rpjs-host-results-title">
         <div class="rpjs-modal-title">
-          <span>Poll Results</span>
+          <h2 id="rpjs-host-results-title">Poll Results</h2>
           <button class="rpjs-modal-close" id="rpjs-results-close" type="button" aria-label="Close poll results">${CLOSE_ICON}</button>
         </div>
         <div class="rpjs-poll-results-question">${this._escapeHtml(results.question)}</div>
@@ -333,13 +391,17 @@ export class HubMenu {
     `;
 
     document.body.appendChild(overlay);
-
-    overlay.querySelector('#rpjs-results-close').addEventListener('click', () => {
+    let deactivate = null;
+    const close = () => {
+      deactivate?.();
+      deactivate = null;
       overlay.remove();
+    };
+    deactivate = activateModal(overlay, {
+      initialFocus: '#rpjs-results-close',
+      onRequestClose: close,
     });
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) overlay.remove();
-    });
+    overlay.querySelector('#rpjs-results-close').addEventListener('click', close);
   }
 
   _renderPollResultRow(answer, index) {
@@ -364,6 +426,10 @@ export class HubMenu {
   }
 
   _closePollModal() {
+    if (this._deactivatePollModal) {
+      this._deactivatePollModal();
+      this._deactivatePollModal = null;
+    }
     if (this._pollModal) {
       this._pollModal.remove();
       this._pollModal = null;
@@ -377,16 +443,31 @@ export class HubMenu {
   }
 
   _escapeAttr(str) {
-    return str.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
   }
 
   show() {
     if (!this.el) this.render();
     this.el.style.display = 'block';
+    this.onVisibilityChange?.(true, false);
+    requestAnimationFrame(() => {
+      if (!this.el || this.el.style.display === 'none') return;
+      const active = document.activeElement;
+      const canMoveFocus = active === document.body
+        || active === document.documentElement
+        || active?.id === 'rpjs-btn-hub';
+      if (canMoveFocus) this.el.querySelector('.rpjs-hub-menu-item')?.focus();
+    });
   }
 
-  hide() {
+  hide(restoreFocus = true) {
     if (this.el) this.el.style.display = 'none';
+    this.onVisibilityChange?.(false, restoreFocus);
   }
 
   toggle() {
@@ -399,6 +480,18 @@ export class HubMenu {
 
   destroy() {
     this._closePollModal();
+    if (this.el && this._keyHandler) {
+      this.el.removeEventListener('keydown', this._keyHandler);
+      this._keyHandler = null;
+    }
+    if (this._outsideClickHandler) {
+      document.removeEventListener('click', this._outsideClickHandler);
+      this._outsideClickHandler = null;
+    }
+    if (this._outsideClickTimer) {
+      clearTimeout(this._outsideClickTimer);
+      this._outsideClickTimer = null;
+    }
     if (this.el) {
       this.el.remove();
       this.el = null;

@@ -29,6 +29,27 @@ function normalizeColor(value, fallback = '#4fc3f7') {
   return typeof value === 'string' && /^#[0-9a-f]{3,8}$/i.test(value) ? value : fallback;
 }
 
+const IDENTITY_COLOR_PALETTE = Object.freeze([
+  '#4fc3f7',
+  '#ffb74d',
+  '#81c784',
+  '#ba68c8',
+  '#ff8a65',
+  '#64b5f6',
+  '#f06292',
+  '#aed581',
+]);
+
+export function chooseAvailableIdentityColor(requestedColor, users) {
+  const requested = normalizeColor(requestedColor).toLowerCase();
+  const used = new Set(
+    Array.from(users?.values?.() || users || [])
+      .map(user => normalizeColor(user?.color).toLowerCase()),
+  );
+  if (!used.has(requested)) return requested;
+  return IDENTITY_COLOR_PALETTE.find(color => !used.has(color.toLowerCase())) || requested;
+}
+
 function normalizeChatText(value) {
   return typeof value === 'string' ? value.slice(0, 4000) : '';
 }
@@ -308,11 +329,12 @@ export class LobbyNetwork {
         const assignedName = !requestedName.startsWith('Visitor')
           ? requestedName
           : `Visitor #${this._visitorCounter}`;
+        const assignedColor = chooseAvailableIdentityColor(msg.payload.color, this.users);
 
         const user = {
           id: peerId,
           username: assignedName,
-          color: normalizeColor(msg.payload.color),
+          color: assignedColor,
           arenaCharacter: normalizeCharacterType(msg.payload.arenaCharacter),
           isHub: false,
           number: this._visitorCounter,
@@ -324,6 +346,7 @@ export class LobbyNetwork {
         fromConn.send(createMessage(MSG.USER_LIST, {
           yourNumber: this._visitorCounter,
           yourAssignedName: user.username,
+          yourAssignedColor: user.color,
           yourArenaCharacter: user.arenaCharacter,
           users: this.getUserList(),
           chatHistory: this.chatMessages.slice(-50),
@@ -472,6 +495,10 @@ export class LobbyNetwork {
           this.myUser.number = msg.payload.yourNumber;
           this.myUser.arenaCharacter = normalizeCharacterType(
             msg.payload.yourArenaCharacter || this.myUser.arenaCharacter,
+          );
+          this.myUser.color = normalizeColor(
+            msg.payload.yourAssignedColor || this.myUser.color,
+            this.myUser.color,
           );
           if (!this.myUser.username || this.myUser.username.startsWith('slide-visitor')) {
             this.myUser.username = msg.payload.yourAssignedName || `slide-visitor#${msg.payload.yourNumber}`;

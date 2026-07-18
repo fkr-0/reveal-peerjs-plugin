@@ -28,13 +28,17 @@ test.describe('Accessibility And Arena', () => {
   test('lobby controls expose basic aria semantics', async ({ page }) => {
     const panel = await openLobby(page);
 
+    await expect(panel).toHaveAttribute('role', 'region');
+    await expect(panel).toHaveAttribute('aria-labelledby', 'rpjs-lobby-title');
+    await expect(panel.locator('#rpjs-chat-messages')).toHaveAttribute('role', 'log');
+
     const targetBtn = panel.locator('#rpjs-target-btn');
-    await expect(targetBtn).toHaveAttribute('aria-haspopup', 'listbox');
+    await expect(targetBtn).toHaveAttribute('aria-haspopup', 'menu');
     await expect(targetBtn).toHaveAttribute('aria-expanded', 'false');
 
     await targetBtn.click();
     await expect(targetBtn).toHaveAttribute('aria-expanded', 'true');
-    await expect(panel.locator('#rpjs-target-dropdown')).toHaveAttribute('role', 'listbox');
+    await expect(panel.locator('#rpjs-target-dropdown')).toHaveAttribute('role', 'menu');
   });
 
   test('hub follow toggle exposes aria-pressed', async ({ page }) => {

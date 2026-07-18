@@ -1,5 +1,79 @@
 import { test, expect } from '@playwright/test';
 
+const RUN_LIVE_PEERJS = process.env.RPJS_LIVE_PEERJS === '1';
+
+function isolatedRoom(label) {
+  return `/example/?multiplayer=${label}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function createConnectedPair(browser, label) {
+  const context1 = await browser.newContext();
+  const context2 = await browser.newContext();
+  const page1 = await context1.newPage();
+  const page2 = await context2.newPage();
+  const url = isolatedRoom(label);
+
+  await page1.goto(url);
+  await expect(page1.locator('.rpjs-toolbar')).toBeVisible();
+  await expect(page1.locator('#rpjs-btn-hub')).toBeVisible({ timeout: 30000 });
+
+  await page2.goto(url);
+  await expect(page2.locator('.rpjs-toolbar')).toBeVisible();
+  await expect(page2.locator('#rpjs-btn-hub')).not.toBeVisible();
+
+  return { context1, context2, page1, page2 };
+}
+
+async function openConnectedLobbies(page1, page2) {
+  await page1.locator('#rpjs-btn-lobby').click();
+  await page2.locator('#rpjs-btn-lobby').click();
+  await expect(page1.locator('.rpjs-lobby-panel')).toBeVisible();
+  await expect(page2.locator('.rpjs-lobby-panel')).toBeVisible();
+  await expect.poll(() => page1.locator('.rpjs-user-item').count(), { timeout: 30000 }).toBeGreaterThanOrEqual(2);
+  await expect.poll(() => page2.locator('.rpjs-user-item').count(), { timeout: 30000 }).toBeGreaterThanOrEqual(2);
+}
+
+async function openHubControls(page, label) {
+  await page.goto(`/e2e/fixtures/hub-sync-harness.html?hub-ui=${label}`);
+  await page.waitForFunction(() => Boolean(window.__rpjsHubSync));
+  await page.evaluate(async () => {
+    const [{ HubMenu }, { injectStyles }] = await Promise.all([
+      import('/src/hub-menu.js'),
+      import('/src/styles.js'),
+    ]);
+    injectStyles();
+    const trigger = document.createElement('button');
+    trigger.id = 'rpjs-btn-hub';
+    trigger.type = 'button';
+    trigger.textContent = 'Hub controls';
+    trigger.setAttribute('aria-expanded', 'false');
+    document.body.appendChild(trigger);
+
+    const network = {
+      jumpAllToSlide: () => {},
+      setFollowMode: active => { window.__rpjsFollowMode = active; },
+      startPoll: () => {},
+    };
+    const menu = new HubMenu(
+      network,
+      { getIndices: () => ({ h: 0, v: 0 }) },
+      () => {},
+      (visible, restoreFocus = true) => {
+        trigger.setAttribute('aria-expanded', visible ? 'true' : 'false');
+        if (!visible && restoreFocus) trigger.focus();
+      },
+    );
+    trigger.addEventListener('click', () => menu.toggle());
+    window.__rpjsTestHubMenu = menu;
+  });
+  const hubButton = page.locator('#rpjs-btn-hub');
+  await expect(hubButton).toBeVisible();
+  await hubButton.click();
+  const menu = page.locator('.rpjs-hub-menu');
+  await expect(menu).toBeVisible();
+  return { hubButton, menu };
+}
+
 /**
  * E2E Tests for Multiplayer Features
  *
@@ -11,21 +85,10 @@ import { test, expect } from '@playwright/test';
  */
 
 test.describe('Multiplayer - Hub and Visitors', () => {
+  test.skip(!RUN_LIVE_PEERJS, 'Set RPJS_LIVE_PEERJS=1 to exercise the public PeerJS signaling service.');
+  test.describe.configure({ timeout: 90000 });
   test('first visitor becomes hub', async ({ browser }) => {
-    // Create two browser contexts
-    const context1 = await browser.newContext();
-    const context2 = await browser.newContext();
-
-    const page1 = await context1.newPage();
-    const page2 = await context2.newPage();
-
-    // Navigate both to the same page
-    await page1.goto('/example/');
-    await page2.goto('/example/');
-
-    // Wait for initialization
-    await page1.waitForTimeout(2000);
-    await page2.waitForTimeout(2000);
+    const { context1, context2, page1, page2 } = await createConnectedPair(browser, 'roles');
 
     // First visitor should see hub button
     const hubBtn1 = page1.locator('#rpjs-btn-hub');
@@ -40,84 +103,41 @@ test.describe('Multiplayer - Hub and Visitors', () => {
   });
 
   test('both users see each other in lobby', async ({ browser }) => {
-    const context1 = await browser.newContext();
-    const context2 = await browser.newContext();
-
-    const page1 = await context1.newPage();
-    const page2 = await context2.newPage();
-
-    await page1.goto('/example/');
-    await page2.goto('/example/');
-
-    await page1.waitForTimeout(2000);
-    await page2.waitForTimeout(2000);
-
-    // Open lobby panels
-    await page1.locator('#rpjs-btn-lobby').click();
-    await page2.locator('#rpjs-btn-lobby').click();
-
-    await page1.waitForTimeout(500);
-    await page2.waitForTimeout(500);
+    const { context1, context2, page1, page2 } = await createConnectedPair(browser, 'presence');
+    await openConnectedLobbies(page1, page2);
 
     // Both should see users in lobby
     const users1 = page1.locator('.rpjs-user-item');
     const users2 = page2.locator('.rpjs-user-item');
 
-    const count1 = await users1.count();
-    const count2 = await users2.count();
-
-    // Should see at least 2 users
-    expect(count1).toBeGreaterThanOrEqual(2);
-    expect(count2).toBeGreaterThanOrEqual(2);
+    await expect(users1).toHaveCount(2);
+    await expect(users2).toHaveCount(2);
 
     await context1.close();
     await context2.close();
   });
 
   test('chat messages appear for both users', async ({ browser }) => {
-    const context1 = await browser.newContext();
-    const context2 = await browser.newContext();
-
-    const page1 = await context1.newPage();
-    const page2 = await context2.newPage();
-
-    await page1.goto('/example/');
-    await page2.goto('/example/');
-
-    await page1.waitForTimeout(2000);
-    await page2.waitForTimeout(2000);
-
-    // Open lobby panels
-    await page1.locator('#rpjs-btn-lobby').click();
-    await page2.locator('#rpjs-btn-lobby').click();
+    const { context1, context2, page1, page2 } = await createConnectedPair(browser, 'chat');
+    await openConnectedLobbies(page1, page2);
 
     // Send message from user 1
     await page1.locator('.rpjs-chat-input').fill('Hello from user 1!');
     await page1.locator('.rpjs-send-btn').click();
 
-    // Wait for message to propagate
-    await page2.waitForTimeout(1000);
-
     // User 2 should see the message
     const messages2 = page2.locator('.rpjs-chat-msg');
-    await expect(messages2).toContainText('Hello from user 1!');
+    await expect(messages2).toContainText('Hello from user 1!', { timeout: 10000 });
 
     await context1.close();
     await context2.close();
   });
 
   test('hub can launch poll', async ({ browser }) => {
-    const context1 = await browser.newContext();
-    const context2 = await browser.newContext();
-
-    const page1 = await context1.newPage();
-    const page2 = await context2.newPage();
-
-    await page1.goto('/example/');
-    await page2.goto('/example/');
-
-    await page1.waitForTimeout(2000);
-    await page2.waitForTimeout(2000);
+    const { context1, context2, page1, page2 } = await createConnectedPair(browser, 'poll');
+    await openConnectedLobbies(page1, page2);
+    await page1.locator('#rpjs-btn-lobby').click();
+    await page2.locator('#rpjs-btn-lobby').click();
 
     // Hub launches poll
     await page1.locator('#rpjs-btn-hub').click();
@@ -143,12 +163,9 @@ test.describe('Multiplayer - Hub and Visitors', () => {
     // Publish poll
     await page1.locator('.rpjs-poll-publish-btn').click();
 
-    // Wait for poll to reach visitor
-    await page2.waitForTimeout(1000);
-
     // Visitor should see poll vote overlay
     const voteOverlay = page2.locator('.rpjs-poll-vote-overlay');
-    await expect(voteOverlay).toBeVisible();
+    await expect(voteOverlay).toBeVisible({ timeout: 10000 });
 
     await context1.close();
     await context2.close();
@@ -157,112 +174,90 @@ test.describe('Multiplayer - Hub and Visitors', () => {
 
 test.describe('Multiplayer - Hub Controls', () => {
   test('hub menu opens and closes', async ({ page }) => {
-    await page.goto('/example/');
-    await page.waitForTimeout(2000);
-
-    const hubBtn = page.locator('#rpjs-btn-hub');
-
-    // Only first visitor gets hub button
-    if (await hubBtn.isVisible()) {
-      await hubBtn.click();
-
-      const hubMenu = page.locator('.rpjs-hub-menu');
-      await expect(hubMenu).toBeVisible();
-
-      // Click hub button again to close
-      await hubBtn.click();
-      await page.waitForTimeout(200);
-
-      await expect(hubMenu).not.toBeVisible();
-    }
+    const { hubButton, menu } = await openHubControls(page, 'hub-toggle');
+    await hubButton.click();
+    await expect(menu).not.toBeVisible();
   });
 
   test('hub menu contains expected options', async ({ page }) => {
-    await page.goto('/example/');
-    await page.waitForTimeout(2000);
-
-    const hubBtn = page.locator('#rpjs-btn-hub');
-
-    if (await hubBtn.isVisible()) {
-      await hubBtn.click();
-
-      const hubMenu = page.locator('.rpjs-hub-menu');
-      await expect(hubMenu).toBeVisible();
-
-      // Check for expected menu items
-      await expect(hubMenu).toContainText('Jump All');
-      await expect(hubMenu).toContainText('Follow Mode');
-      await expect(hubMenu).toContainText('Launch Poll');
-      await expect(hubMenu).toContainText('Launch Arena');
-    }
+    const { menu } = await openHubControls(page, 'hub-options');
+    await expect(menu).toContainText('Jump All');
+    await expect(menu).toContainText('Follow Mode');
+    await expect(menu).toContainText('Launch Poll');
+    await expect(menu).toContainText('Launch Arena');
   });
 
   test('follow mode can be toggled', async ({ page }) => {
-    await page.goto('/example/');
-    await page.waitForTimeout(2000);
-
-    const hubBtn = page.locator('#rpjs-btn-hub');
-
-    if (await hubBtn.isVisible()) {
-      await hubBtn.click();
-
-      const followItem = page.locator('.rpjs-hub-menu-item').filter({ hasText: /follow/i });
-      await followItem.click();
-
-      await page.waitForTimeout(200);
-
-      // Should show active state
-      await expect(followItem).toHaveClass(/rpjs-active-feature/);
-
-      // Click again to disable
-      await followItem.click();
-      await page.waitForTimeout(200);
-
-      await expect(followItem).not.toHaveClass(/rpjs-active-feature/);
-    }
+    const { menu } = await openHubControls(page, 'hub-follow');
+    const followItem = menu.locator('.rpjs-hub-menu-item').filter({ hasText: /follow/i });
+    await followItem.click();
+    await expect(followItem).toHaveClass(/rpjs-active-feature/);
+    await followItem.click();
+    await expect(followItem).not.toHaveClass(/rpjs-active-feature/);
   });
 });
 
 test.describe('Multiplayer - User States', () => {
-  test('users have distinct colors', async ({ browser }) => {
-    const context1 = await browser.newContext();
-    const context2 = await browser.newContext();
+  test('Hub-assigned identity colors render as distinct participant markers', async ({ page }) => {
+    await page.goto('/e2e/fixtures/hub-sync-harness.html');
+    await page.waitForFunction(() => Boolean(window.__rpjsHubSync));
 
-    const page1 = await context1.newPage();
-    const page2 = await context2.newPage();
+    const colors = await page.evaluate(async () => {
+      const [{ LobbyPanel }, { injectStyles }] = await Promise.all([
+        import('/src/lobby-panel.js'),
+        import('/src/styles.js'),
+      ]);
+      const { LobbyNetwork, MSG } = window.__rpjsHubSync;
+      injectStyles();
 
-    await page1.goto('/example/');
-    await page2.goto('/example/');
+      const hub = new LobbyNetwork();
+      hub.isHub = true;
+      hub.myId = 'hub';
+      hub.myUser = {
+        id: 'hub', username: 'Hub', color: '#4fc3f7', arenaCharacter: 'vanguard', isHub: true, number: 0,
+      };
+      hub.users.set('hub', { ...hub.myUser, conn: null });
+      hub._handleHubMessage({
+        type: MSG.JOIN,
+        payload: { username: 'Visitor', color: '#4fc3f7', arenaCharacter: 'scout' },
+      }, { peer: 'visitor-a', send: () => {} });
 
-    await page1.waitForTimeout(2000);
-    await page2.waitForTimeout(2000);
+      const panel = new LobbyPanel({
+        myId: hub.myId,
+        chatMessages: [],
+        getUserList: () => hub.getUserList(),
+        sendChat: () => {},
+      }, { goOffline: false });
+      panel.show();
+      return Array.from(panel.el.querySelectorAll('.rpjs-user-dot'))
+        .map(dot => getComputedStyle(dot).backgroundColor);
+    });
 
-    await page1.locator('#rpjs-btn-lobby').click();
-    await page2.locator('#rpjs-btn-lobby').click();
-
-    // Get user colors
-    const colors1 = await page1.locator('.rpjs-user-dot').all()
-      .then(dots => Promise.all(dots.map(d => d.evaluate(el => el.style.backgroundColor))));
-
-    // Should have at least 2 different colors
-    const uniqueColors = [...new Set(colors1)];
-    expect(uniqueColors.length).toBeGreaterThanOrEqual(1);
-
-    await context1.close();
-    await context2.close();
+    expect(new Set(colors).size).toBeGreaterThanOrEqual(2);
   });
 
   test('self is marked in user list', async ({ page }) => {
-    await page.goto('/example/');
-    await page.waitForTimeout(2000);
+    await page.goto('/e2e/fixtures/hub-sync-harness.html');
+    await page.waitForFunction(() => Boolean(window.__rpjsHubSync));
+    await page.evaluate(async () => {
+      const [{ LobbyPanel }, { injectStyles }] = await Promise.all([
+        import('/src/lobby-panel.js'),
+        import('/src/styles.js'),
+      ]);
+      injectStyles();
+      const user = {
+        id: 'self', username: 'Self', color: '#4fc3f7', arenaCharacter: 'vanguard', isHub: true, number: 0,
+      };
+      const panel = new LobbyPanel({
+        myId: 'self',
+        chatMessages: [],
+        getUserList: () => [user],
+        sendChat: () => {},
+      }, { goOffline: false });
+      panel.show();
+    });
 
-    await page.locator('#rpjs-btn-lobby').click();
-
-    const panel = page.locator('.rpjs-lobby-panel');
-
-    // Should have "You" tag or indicator
-    const selfTag = panel.locator('.rpjs-user-self-tag');
-    await expect(selfTag).toHaveCount(1);
+    await expect(page.locator('.rpjs-user-self-tag')).toHaveCount(1);
   });
 });
 
@@ -276,9 +271,8 @@ test.describe('Multiplayer - Connection States', () => {
     await expect(toolbar).toBeVisible();
   });
 
-  test('handles connection gracefully', async ({ page }) => {
-    await page.goto('/example/');
-    await page.waitForTimeout(3000);
+  test('exposes connection progress without disabling local controls', async ({ page }) => {
+    await page.goto(isolatedRoom('connection-state'));
 
     // Should be connected - no error indicators visible
     const toolbar = page.locator('.rpjs-toolbar');
@@ -287,5 +281,7 @@ test.describe('Multiplayer - Connection States', () => {
     // Buttons should be enabled
     const chatBtn = page.locator('#rpjs-btn-lobby');
     await expect(chatBtn).toBeEnabled();
+    await chatBtn.click();
+    await expect(page.locator('#rpjs-status-label')).toHaveText(/^(Connecting|Connected|Offline)$/);
   });
 });

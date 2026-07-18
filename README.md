@@ -31,9 +31,16 @@ The first visitor becomes the **Hub** with special powers:
 ### ⚙️ Settings
 - Customize your **username** and **color**
 - Select an **Arena character** with a distinct loadout and stat profile
-- **Dark mode** — Force dark styling on presentations
-- **High contrast** — Enhanced accessibility
-- **Offline mode** — Temporarily disconnect from the lobby
+- **Darken presentation** — Apply dark styling to slide content
+- **Enhanced contrast** — Strengthen borders, focus, and text separation
+- **Work offline** — Temporarily disconnect from the lobby
+
+### ♿ User Experience & Accessibility
+- **44px targets** — Primary buttons, switches, fields, menus, and close controls are sized for touch and motor accessibility
+- **Keyboard complete** — Dialogs, message targets, participant actions, Hub controls, polls, and games expose predictable focus and Escape behavior
+- **Readable identity** — Colors remain visible as collision-resistant markers without being used as uncontrolled text colors
+- **Adaptive rendering** — Supports reduced motion, forced colors, enhanced contrast, mobile safe areas, and constrained viewports
+- **Familiar feedback** — Disabled actions, validation messages, connection text, participant counts, and empty states explain what happens next
 
 ## 🚀 Installation
 
@@ -151,7 +158,7 @@ Reveal.initialize({
 
 ### Pong
 
-1. Right-click any user in the lobby panel
+1. Open a participant's visible **More actions** button, or use the context menu
 2. Select **"Challenge to Pong"**
 3. Semi-transparent overlay appears on both screens
 4. Challenger on **left**, opponent on **right**
@@ -218,8 +225,14 @@ pnpm preview
 # Run e2e tests
 pnpm test:e2e
 
+# Exercise the public PeerJS signaling service (non-hermetic)
+pnpm test:live-peerjs
+
 # Parse-check source, scripts, and tests
 pnpm check
+
+# Run the standalone desktop/mobile UI quality audit
+pnpm test:ui-audit
 
 # Run e2e tests in UI mode
 pnpm test:e2e:ui
@@ -237,7 +250,9 @@ reveal-peerjs-plugin/
 │   ├── networking.js      # PeerJS lobby management
 │   ├── protocol.js        # Message protocol definitions
 │   ├── settings.js        # Settings persistence
-│   ├── styles.js          # CSS injection
+│   ├── styles.js          # Component structure and CSS injection
+│   ├── styles-system.js   # Shared design tokens, responsive, contrast, and focus rules
+│   ├── ui-a11y.js         # Focus traps, modal behavior, and disclosure state helpers
 │   ├── icons.js           # SVG icons
 │   ├── lobby-panel.js     # Lobby UI component
 │   ├── settings-modal.js  # Settings dialog
@@ -253,7 +268,8 @@ reveal-peerjs-plugin/
 │   └── index.html         # Demo presentation
 ├── dist/                  # Built output (generated)
 ├── scripts/
-│   └── dev-server.js      # Dev server helper
+│   ├── dev-server.js      # Dev server helper
+│   └── ui-audit.mjs       # Self-contained desktop/mobile UI audit
 ├── vite.config.js         # Vite configuration
 └── package.json
 ```
@@ -261,6 +277,8 @@ reveal-peerjs-plugin/
 ## 🧪 Testing
 
 The project includes comprehensive end-to-end tests using [Playwright](https://playwright.dev/).
+
+The default release matrix is hermetic. Public PeerJS signaling is exercised separately with `pnpm test:live-peerjs`, because third-party service availability should not make local release checks flaky.
 
 ### Running Tests
 
@@ -276,6 +294,9 @@ pnpm test:e2e:ui
 
 # Run tests in headed mode (show browser windows)
 pnpm test:e2e:headed
+
+# Run target-size, naming, and viewport UI checks
+pnpm test:ui-audit
 ```
 
 ### Test Coverage
@@ -289,6 +310,7 @@ pnpm test:e2e:headed
 - **Games** - Pong relay lifecycle, Arena reconciliation, deterministic random simulation, statistics, bounded commands, disconnect/leave cleanup, and swept collision detection
 - **Responsive Design** - Mobile, tablet, desktop viewports
 - **Keyboard Navigation** - Tab focus, Escape to close
+- **UI Quality** - 44px targets, focus traps, popover/menu behavior, staged settings, text and non-text contrast, mobile bounds, and reduced motion
 
 ### Building
 

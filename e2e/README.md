@@ -16,6 +16,9 @@ pnpm install
 # Run all tests
 pnpm test:e2e
 
+# Run the optional public PeerJS signaling integration
+pnpm test:live-peerjs
+
 # Run tests in UI mode (interactive)
 pnpm test:e2e:ui
 
@@ -24,9 +27,14 @@ pnpm test:e2e:headed
 
 # Syntax-check source, scripts, and tests
 pnpm check
+
+# Run standalone target-size, naming, and viewport checks
+pnpm test:ui-audit
 ```
 
 ## Test Structure
+
+The default suite avoids third-party availability as a release dependency. The four real shared-room tests run only when `RPJS_LIVE_PEERJS=1` or through `pnpm test:live-peerjs`.
 
 - `plugin.spec.js` - Core plugin functionality tests
 - `multiplayer.spec.js` - Multi-user and peer-to-peer tests
@@ -34,6 +42,7 @@ pnpm check
 - `networking-logic.spec.js` - Hub epoch, ordering, and direct-peer rejection guards
 - `arena-logic.spec.js` - Character, item, collision, weapon, and Arena simulation primitives
 - `poll-options.spec.js` - Poll modes, result sharing, aggregation, and visualization
+- `ui-quality.spec.js` - Target sizing, focus, contrast, responsive bounds, menus, settings, and reduced motion
 
 ## Writing Tests
 
