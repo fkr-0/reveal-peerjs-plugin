@@ -5,27 +5,22 @@
  * a shared arena with walls/obstacles.
  *
  * Controls:
- *   H/J/K/L  - Move left/down/up/right
+ *   WASD/HJKL - Move left/down/up/right
  *   Mouse    - Aim direction (line from player circle)
- *   Space    - Shoot burst of bullets
+ *   Click/Space - Shoot
  *
  * Rules:
- *   - Each player is a colored circle on the map
- *   - Map has randomly placed wall segments (short lines)
+ *   - Each player uses a configured character archetype
+ *   - Map and simulation randomness are derived from the round seed
  *   - Bullets travel until they hit a wall, player, or leave the screen
- *   - Being hit once: circle becomes half-filled, movement speed increases
- *   - Being hit twice: eliminated (circle turns into ghost marker)
  *   - Hub syncs authoritative game state; clients send inputs
  */
 
-import { CLOSE_ICON } from './icons.js';
 import {
   PLAYER_RADIUS,
-  DIRECTION_LINE_LEN,
   BASE_SPEED,
   BOOST_SPEED,
   BULLET_SPEED,
-  BULLET_LENGTH,
   BULLET_COUNT_CLOSE,
   BULLET_COUNT_FAR,
   SPREAD_CLOSE,
@@ -47,12 +42,25 @@ import {
   dist,
   updateBullets,
   bulletTargetDistance,
+  applyDamage,
   applyBulletCollisions,
   updateItems,
 } from './arena-sim.js';
 import { generatePlayableMap } from './arena-map.js';
+import { createSeededRandom, randomInt } from './arena-rng.js';
+import {
+  createArenaBulletSnapshot,
+  createArenaPlayerSnapshot,
+  createArenaStanding,
+  reconcileArenaPlayer,
+} from './arena-state.js';
 import { bindArenaInput, unbindArenaInput } from './arena-input.js';
-import { drawArena, updateArenaHud, updateArenaScoreboard } from './arena-render.js';
+import {
+  drawArena,
+  updateArenaEventFeed,
+  updateArenaHud,
+  updateArenaScoreboard,
+} from './arena-render.js';
 
 // ---------- Helpers ----------
 // Line-segment / circle intersection
@@ -70,6 +78,30 @@ function lineCircleIntersect(x1, y1, x2, y2, cx, cy, r) {
   const t1 = (-b - disc) / (2 * a);
   const t2 = (-b + disc) / (2 * a);
   return (t1 >= 0 && t1 <= 1) || (t2 >= 0 && t2 <= 1) || (t1 < 0 && t2 > 1);
+}
+
+export function collectArenaUsers(network) {
+  const usersById = new Map();
+  for (const user of network.getUserList() || []) {
+    if (!user?.id) continue;
+    usersById.set(user.id, {
+      ...user,
+      arenaCharacter: normalizeCharacterType(user.arenaCharacter),
+    });
+  }
+  const myUser = network.myUser;
+  if (myUser?.id && !usersById.has(myUser.id)) {
+    usersById.set(myUser.id, {
+      ...myUser,
+      arenaCharacter: normalizeCharacterType(myUser.arenaCharacter),
+    });
+  }
+  const users = Array.from(usersById.values());
+  return users.sort((a, b) => {
+    if (a.isHub && !b.isHub) return -1;
+    if (!a.isHub && b.isHub) return 1;
+    return (a.number || 0) - (b.number || 0);
+  });
 }
 
 export function createArenaPlayer(user, spawn) {
@@ -103,6 +135,11 @@ export function createArenaPlayer(user, spawn) {
     lastRegenAt: 0,
     lastShootTime: 0,
     lastInputAt: 0,
+    kills: 0,
+    deaths: 0,
+    damageDealt: 0,
+    damageTaken: 0,
+    pickups: 0,
     eliminated: false,
   };
 }
@@ -123,6 +160,7 @@ export class ArenaGame {
     this.isHub = isHub;
     this._onStartCb = onStart || null;
     this._onStopCb = onStop || null;
+    this._stopNotified = true;
     this.el = null;
     this.canvas = null;
     this.ctx = null;
@@ -139,6 +177,8 @@ export class ArenaGame {
     this.bullets = []; // { x, y, vx, vy, from, color, life }
     this.seed = 0;
     this.gameId = null;
+    this._random = createSeededRandom(1);
+    this._entitySequence = 0;
     this.items = []; // { id, type, x, y, ttl }
     this._itemSpawnAt = 0;
     this.zombieMode = false;
@@ -177,6 +217,10 @@ export class ArenaGame {
     this._leaveSent = false;
     this._statusText = '';
     this._statusTextUntil = 0;
+    this._events = [];
+    this._hitFlashes = [];
+    this._sparks = [];
+    this._endCloseHandler = null;
     this._keyDownHandler = null;
     this._keyUpHandler = null;
     this._mouseMoveHandler = null;
@@ -190,6 +234,7 @@ export class ArenaGame {
     if (!this.isHub || payload?.gameId !== this.gameId) return;
     if (!this.players.delete(payload.peerId)) return;
     this.bullets = this.bullets.filter(bullet => bullet.from !== payload.peerId);
+    this._recordEvent('A player left the Arena', '#b0bec5', 'leave');
     this._checkGameOver();
   }
 
@@ -197,37 +242,34 @@ export class ArenaGame {
    * Start the game (hub calls this to begin)
    */
   start(gameConfig) {
+    if (this.el || this.running || this._stateBroadcastInterval || this._inputSendInterval) {
+      this.stop();
+    }
+    this._stopNotified = false;
+    this.players.clear();
+    this.bullets = [];
+    this.items = [];
+    this.zombies = [];
+    this._hitFlashes = [];
+    this._sparks = [];
+    this._itemSpawnAt = 0;
     this._leaveSent = false;
     this.gameId = gameConfig.gameId;
     this.seed = gameConfig.seed;
+    this._random = createSeededRandom(this.seed);
+    this._entitySequence = 0;
+    this._events = [];
 
     this._render();
     this._resize();
 
+    const userList = collectArenaUsers(this.network);
+
     // Generate playable map from seed
-    const userCount = Math.max(1, this.network.getUserList().length + (this.network.myUser ? 1 : 0));
+    const userCount = Math.max(1, userList.length);
     const map = generatePlayableMap(this.W, this.H, this.seed, userCount);
     this.walls = map.walls;
     this._spawnPoints = map.spawns;
-
-    // Build full user list (visitors don't include themselves in getUserList)
-    const userList = this.network.getUserList();
-    const myUser = this.network.myUser;
-    if (myUser && !userList.find(u => u.id === myUser.id)) {
-      userList.push({
-        id: myUser.id,
-        username: myUser.username,
-        color: myUser.color,
-        arenaCharacter: normalizeCharacterType(myUser.arenaCharacter),
-        isHub: myUser.isHub,
-        number: myUser.number,
-      });
-      userList.sort((a, b) => {
-        if (a.isHub && !b.isHub) return -1;
-        if (!a.isHub && b.isHub) return 1;
-        return (a.number || 0) - (b.number || 0);
-      });
-    }
 
     for (let i = 0; i < userList.length; i++) {
       const user = userList[i];
@@ -244,6 +286,9 @@ export class ArenaGame {
     this._nextWaveAtKills = 10;
     if (this.zombieMode) {
       this._setStatus('Zombie Mode: survive as long as possible');
+      this._recordEvent('Zombie survival started', '#ff8a65', 'mode');
+    } else {
+      this._recordEvent('Arena round started', '#ffa726', 'mode');
     }
 
     this._bindEvents();
@@ -322,6 +367,7 @@ export class ArenaGame {
         <button class="rpjs-arena-shoot-btn" id="rpjs-arena-shoot-btn">FIRE</button>
       </div>
       <div class="rpjs-arena-scoreboard" id="rpjs-arena-scoreboard"></div>
+      <div class="rpjs-arena-event-feed" id="rpjs-arena-event-feed" aria-live="polite"></div>
       <details class="rpjs-arena-item-legend">
         <summary>Items</summary>
         <div class="rpjs-arena-item-legend-grid">${itemLegend}</div>
@@ -360,6 +406,22 @@ export class ArenaGame {
     if (this._onArenaHit) this.network.off('arena-hit', this._onArenaHit);
     if (this._onArenaEnd) this.network.off('arena-end', this._onArenaEnd);
     if (this._onArenaLeave) this.network.off('arena-leave', this._onArenaLeave);
+  }
+
+  _nextEntityId(prefix) {
+    this._entitySequence++;
+    return `${prefix}-${this.gameId}-${this._entitySequence}`;
+  }
+
+  _recordEvent(text, color = '#fff', kind = 'info') {
+    if (!text) return;
+    this._events.push({
+      id: this._nextEntityId('event'),
+      text,
+      color,
+      kind,
+    });
+    if (this._events.length > 6) this._events.splice(0, this._events.length - 6);
   }
 
   // ---------- Input ----------
@@ -578,6 +640,9 @@ export class ArenaGame {
   }
 
   _handleRemoteHit(hit) {
+    // The Hub already applied authoritative damage and visual feedback before
+    // publishing this event. Only followers consume the replicated hit.
+    if (this.isHub) return;
     if (hit.gameId && hit.gameId !== this.gameId) return;
     // Apply hit from authoritative state
     const player = this.players.get(hit.targetId);
@@ -593,48 +658,10 @@ export class ArenaGame {
   _hubBroadcastState() {
     const playerStates = {};
     for (const [id, p] of this.players) {
-      playerStates[id] = {
-        x: Math.round(p.x * 10) / 10,
-        y: Math.round(p.y * 10) / 10,
-        angle: Math.round(p.angle * 100) / 100,
-        username: p.username,
-        color: p.color,
-        hp: p.hp,
-        maxHp: p.maxHp,
-        armor: p.armor,
-        maxArmor: p.maxArmor,
-        character: p.character,
-        characterLabel: p.characterLabel,
-        characterGlyph: p.characterGlyph,
-        radius: p.radius,
-        baseWeapon: p.baseWeapon,
-        weapon: p.weapon,
-        weaponUntil: p.weaponUntil || 0,
-        speedMultiplier: p.speedMultiplier,
-        damageMultiplier: p.damageMultiplier,
-        cooldownMultiplier: p.cooldownMultiplier,
-        pickupRadiusMultiplier: p.pickupRadiusMultiplier,
-        itemDurationMultiplier: p.itemDurationMultiplier,
-        hasteUntil: p.hasteUntil || 0,
-        overchargeUntil: p.overchargeUntil || 0,
-        magnetUntil: p.magnetUntil || 0,
-        regenUntil: p.regenUntil || 0,
-        eliminated: p.eliminated,
-      };
+      playerStates[id] = createArenaPlayerSnapshot(p);
     }
 
-    const bulletStates = this.bullets.map(b => ({
-      x: Math.round(b.x * 10) / 10,
-      y: Math.round(b.y * 10) / 10,
-      vx: Math.round(b.vx * 10) / 10,
-      vy: Math.round(b.vy * 10) / 10,
-      from: b.from,
-      color: b.color,
-      life: b.life,
-      damage: b.damage,
-      speed: b.speed,
-      weapon: b.weapon,
-    }));
+    const bulletStates = this.bullets.map(createArenaBulletSnapshot);
 
     this.network.broadcastArenaState({
       gameId: this.gameId,
@@ -646,6 +673,7 @@ export class ArenaGame {
       zombiesPerMin: this._zombiesPerMin,
       zombieWave: this._zombieWave,
       zombiesDefeated: this._zombiesDefeated,
+      events: this._events,
     });
   }
 
@@ -661,47 +689,10 @@ export class ArenaGame {
     }
 
     for (const [id, ps] of Object.entries(state.players || {})) {
-      let player = this.players.get(id);
-      if (!player) {
-        player = {
-          x: ps.x, y: ps.y, angle: ps.angle, color: '#4fc3f7', username: '?',
-          hp: ps.maxHp || BASE_HP, maxHp: ps.maxHp || BASE_HP,
-          armor: 0, maxArmor: ps.maxArmor || 100,
-          character: ps.character || 'vanguard', characterLabel: ps.characterLabel || 'Vanguard',
-          characterGlyph: ps.characterGlyph || 'V', radius: ps.radius || PLAYER_RADIUS,
-          baseWeapon: ps.baseWeapon || 'blaster', weapon: ps.weapon || 'blaster',
-          weaponUntil: 0, lastShootTime: 0, eliminated: false
-        };
-        this.players.set(id, player);
-      }
+      const player = reconcileArenaPlayer(this.players.get(id), ps);
+      this.players.set(id, player);
       // The hub is authoritative for every player, including the local one.
       // Client prediction is temporary and is reconciled by each snapshot.
-      player.x = ps.x;
-      player.y = ps.y;
-      player.angle = ps.angle;
-      player.username = ps.username || player.username || '?';
-      player.color = ps.color || player.color || '#4fc3f7';
-      player.hp = ps.hp ?? BASE_HP;
-      player.maxHp = ps.maxHp || BASE_HP;
-      player.armor = ps.armor ?? 0;
-      player.maxArmor = ps.maxArmor || 100;
-      player.character = ps.character || 'vanguard';
-      player.characterLabel = ps.characterLabel || 'Vanguard';
-      player.characterGlyph = ps.characterGlyph || 'V';
-      player.radius = ps.radius || PLAYER_RADIUS;
-      player.baseWeapon = ps.baseWeapon || 'blaster';
-      player.weapon = ps.weapon || 'blaster';
-      player.weaponUntil = ps.weaponUntil || 0;
-      player.speedMultiplier = ps.speedMultiplier || 1;
-      player.damageMultiplier = ps.damageMultiplier || 1;
-      player.cooldownMultiplier = ps.cooldownMultiplier || 1;
-      player.pickupRadiusMultiplier = ps.pickupRadiusMultiplier || 1;
-      player.itemDurationMultiplier = ps.itemDurationMultiplier || 1;
-      player.hasteUntil = ps.hasteUntil || 0;
-      player.overchargeUntil = ps.overchargeUntil || 0;
-      player.magnetUntil = ps.magnetUntil || 0;
-      player.regenUntil = ps.regenUntil || 0;
-      player.eliminated = ps.eliminated;
     }
 
     // Replace bullets with server state (authoritative)
@@ -712,6 +703,7 @@ export class ArenaGame {
     this._zombiesPerMin = state.zombiesPerMin || this._zombiesPerMin;
     this._zombieWave = state.zombieWave || this._zombieWave;
     this._zombiesDefeated = state.zombiesDefeated || this._zombiesDefeated;
+    this._events = (state.events || []).slice(-6).map(event => ({ ...event }));
   }
 
   // ---------- Game loop ----------
@@ -731,6 +723,7 @@ export class ArenaGame {
     this._draw();
     this._updateHud();
     this._updateScoreboard();
+    this._updateEventFeed();
 
     this.animFrame = requestAnimationFrame(() => this._loop());
   }
@@ -798,6 +791,15 @@ export class ArenaGame {
       hitFlashes: this._hitFlashes,
       sparks: this._sparks,
     }, (hitData) => {
+      const attacker = this.players.get(hitData.sourceId);
+      const target = this.players.get(hitData.targetId);
+      if (hitData.newlyEliminated && attacker && target) {
+        this._recordEvent(
+          `${attacker.username} eliminated ${target.username}`,
+          attacker.color,
+          'elimination',
+        );
+      }
       this.network.broadcastArenaHit(hitData);
       this._checkGameOver();
     });
@@ -810,12 +812,20 @@ export class ArenaGame {
         const z = this.zombies[zi];
         const d = bulletTargetDistance(b, z);
         if (d > z.r + 3) continue;
-        z.hp -= (b.damage || 25);
+        const damage = Math.min(z.hp, b.damage || 25);
+        z.hp -= damage;
+        const attacker = this.players?.get(b.from);
+        if (attacker) attacker.damageDealt = (attacker.damageDealt || 0) + damage;
         this._sparks.push({ x: b.x, y: b.y, life: 7, color: z.color });
         this.bullets.splice(bi, 1);
         if (z.hp <= 0) {
           this._zombiesDefeated++;
           this._setStatus(`Zombie down! (${this._zombiesDefeated})`);
+          this._recordEvent(
+            `${attacker?.username || 'Player'} defeated a ${z.archetype}`,
+            attacker?.color || '#fff',
+            'elimination',
+          );
           this.zombies.splice(zi, 1);
           this._checkWaveMilestone();
         }
@@ -823,9 +833,6 @@ export class ArenaGame {
       }
     }
   }
-
-  _hitFlashes = [];
-  _sparks = [];
 
   _updateItems() {
     if (!this.isHub) return;
@@ -836,8 +843,13 @@ export class ArenaGame {
       W: this.W,
       H: this.H,
       itemSpawnAt: this._itemSpawnAt,
+      random: this._random,
+      createId: (prefix) => this._nextEntityId(prefix),
     };
-    updateItems(state, lineCircleIntersect, (text) => this._setStatus(text));
+    updateItems(state, lineCircleIntersect, ({ text, player, item }) => {
+      this._setStatus(text);
+      this._recordEvent(text, ITEM_TYPES[item.type]?.color || player.color, 'pickup');
+    });
     this._itemSpawnAt = state.itemSpawnAt;
   }
 
@@ -865,11 +877,26 @@ export class ArenaGame {
 
       if (d < z.r + (target.radius || PLAYER_RADIUS) + 2 && now - (z.lastBiteAt || 0) > 500) {
         z.lastBiteAt = now;
-        target.hp -= 8;
-        if (target.hp <= 0) {
-          target.hp = 0;
-          target.eliminated = true;
+        const damage = applyDamage(target, 8, 0.5);
+        this._hitFlashes.push({ x: target.x, y: target.y, time: 15, color: z.color });
+        this.network.broadcastArenaHit({
+          gameId: this.gameId,
+          sourceId: z.id,
+          sourceType: 'zombie',
+          targetId: this.network.myId,
+          hp: target.hp,
+          armor: target.armor,
+          damage: damage.totalDamage,
+          eliminated: target.eliminated,
+          newlyEliminated: damage.newlyEliminated,
+          x: target.x,
+          y: target.y,
+          color: target.color,
+        });
+        if (damage.newlyEliminated) {
+          this._recordEvent('The horde ended the run', z.color, 'elimination');
           this._checkGameOver();
+          break;
         }
       }
       if (z.hp <= 0) this.zombies.splice(i, 1);
@@ -877,20 +904,20 @@ export class ArenaGame {
   }
 
   _spawnZombie() {
-    const side = Math.floor(Math.random() * 4);
+    const side = randomInt(this._random, 4);
     let x = 0; let y = 0;
-    if (side === 0) { x = Math.random() * this.W; y = -30; }
-    if (side === 1) { x = this.W + 30; y = Math.random() * this.H; }
-    if (side === 2) { x = Math.random() * this.W; y = this.H + 30; }
-    if (side === 3) { x = -30; y = Math.random() * this.H; }
+    if (side === 0) { x = this._random() * this.W; y = -30; }
+    if (side === 1) { x = this.W + 30; y = this._random() * this.H; }
+    if (side === 2) { x = this._random() * this.W; y = this.H + 30; }
+    if (side === 3) { x = -30; y = this._random() * this.H; }
     const runnerBias = Math.min(0.75, 0.55 + this._zombieWave * 0.03);
-    const isRunner = Math.random() < runnerBias;
+    const isRunner = this._random() < runnerBias;
     const archetype = isRunner ? 'runner' : 'tank';
     const stats = isRunner
-      ? { r: 10 + Math.random() * 2, hp: 28 + this._zombieWave * 2, speed: 1.1 + Math.random() * 0.45, color: '#4dd0e1' }
-      : { r: 16 + Math.random() * 3, hp: 95 + this._zombieWave * 7, speed: 0.42 + Math.random() * 0.2, color: '#ff8a65' };
+      ? { r: 10 + this._random() * 2, hp: 28 + this._zombieWave * 2, speed: 1.1 + this._random() * 0.45, color: '#4dd0e1' }
+      : { r: 16 + this._random() * 3, hp: 95 + this._zombieWave * 7, speed: 0.42 + this._random() * 0.2, color: '#ff8a65' };
     this.zombies.push({
-      id: `z-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      id: this._nextEntityId('zombie'),
       x, y,
       r: stats.r,
       hp: stats.hp,
@@ -909,6 +936,7 @@ export class ArenaGame {
     this._nextWaveAtKills += 8 + this._zombieWave * 2;
     this._zombiesPerMin += 2.5;
     this._setStatus(`Wave ${this._zombieWave}! Reward drop incoming`);
+    this._recordEvent(`Wave ${this._zombieWave} reached`, '#ffee58', 'wave');
     this._dropWaveRewards();
   }
 
@@ -919,12 +947,12 @@ export class ArenaGame {
     const cx = my ? my.x : this.W / 2;
     const cy = my ? my.y : this.H / 2;
     for (let i = 0; i < dropCount; i++) {
-      const t = rewardTypes[Math.floor(Math.random() * rewardTypes.length)];
+      const t = rewardTypes[randomInt(this._random, rewardTypes.length)];
       if (!ITEM_TYPES[t]) continue;
       const angle = (Math.PI * 2 * i) / dropCount;
-      const radius = 56 + Math.random() * 36;
+      const radius = 56 + this._random() * 36;
       this.items.push({
-        id: `it-wave-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+        id: this._nextEntityId('wave-item'),
         type: t,
         x: clamp(cx + Math.cos(angle) * radius, 30, this.W - 30),
         y: clamp(cy + Math.sin(angle) * radius, 30, this.H - 30),
@@ -949,6 +977,7 @@ export class ArenaGame {
         durationMs: Date.now() - this._zombieStartAt,
         zombiesDefeated: (this._zombiesDefeated || 0),
         zombieWave: this._zombieWave,
+        standings: Array.from(this.players.entries()).map(([id, player]) => createArenaStanding(id, player)),
       });
       return;
     }
@@ -969,18 +998,7 @@ export class ArenaGame {
       this.network.broadcastArenaEnd({
         gameId: this.gameId,
         winner: alivePlayers[0] || null,
-        standings: Array.from(this.players.entries()).map(([id, p]) => ({
-          id,
-          username: p.username,
-          color: p.color,
-          hp: p.hp,
-          maxHp: p.maxHp,
-          armor: p.armor,
-          maxArmor: p.maxArmor,
-          character: p.character,
-          weapon: p.weapon,
-          eliminated: p.eliminated,
-        })),
+        standings: Array.from(this.players.entries()).map(([id, player]) => createArenaStanding(id, player)),
       });
     }
   }
@@ -1000,6 +1018,7 @@ export class ArenaGame {
     ctx.textAlign = 'center';
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 36px -apple-system, sans-serif';
+    const localStanding = (results.standings || []).find(standing => standing.id === this.network.myId);
     if (results.zombieMode) {
       const sec = Math.round((results.durationMs || 0) / 1000);
       ctx.fillText(`Survived ${sec}s`, this.W / 2, this.H / 2 - 20);
@@ -1011,13 +1030,23 @@ export class ArenaGame {
     } else {
       ctx.fillText('Draw!', this.W / 2, this.H / 2 - 20);
     }
+    if (localStanding) {
+      ctx.font = '14px -apple-system, sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.72)';
+      ctx.fillText(
+        `K ${localStanding.kills} · Damage ${localStanding.damageDealt} · Pickups ${localStanding.pickups}`,
+        this.W / 2,
+        this.H / 2 + 38,
+      );
+    }
     ctx.font = '16px -apple-system, sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    ctx.fillText('Click or press any key to close', this.W / 2, this.H / 2 + 20);
+    ctx.fillText('Click or press any key to close', this.W / 2, this.H / 2 + 68);
 
-    const close = () => this.stop();
-    this.el.addEventListener('click', close, { once: true });
-    document.addEventListener('keydown', close, { once: true });
+    this._unbindEndCloseHandler();
+    this._endCloseHandler = () => this.stop();
+    this.el.addEventListener('click', this._endCloseHandler, { once: true });
+    document.addEventListener('keydown', this._endCloseHandler, { once: true });
   }
 
   // ---------- Drawing ----------
@@ -1027,6 +1056,15 @@ export class ArenaGame {
   _updateScoreboard() { updateArenaScoreboard(this); }
 
   _updateHud() { updateArenaHud(this); }
+
+  _updateEventFeed() { updateArenaEventFeed(this); }
+
+  _unbindEndCloseHandler() {
+    if (!this._endCloseHandler) return;
+    this.el?.removeEventListener('click', this._endCloseHandler);
+    document.removeEventListener('keydown', this._endCloseHandler);
+    this._endCloseHandler = null;
+  }
 
   // ---------- Cleanup ----------
 
@@ -1043,6 +1081,7 @@ export class ArenaGame {
       this.network.sendArenaLeave(this.gameId);
     }
     this.running = false;
+    this._unbindEndCloseHandler();
     if (this.animFrame) {
       cancelAnimationFrame(this.animFrame);
       this.animFrame = null;
@@ -1070,6 +1109,10 @@ export class ArenaGame {
     this.zombies = [];
     this._hitFlashes = [];
     this._sparks = [];
-    if (this._onStopCb) this._onStopCb();
+    this._events = [];
+    if (!this._stopNotified && this._onStopCb) {
+      this._stopNotified = true;
+      this._onStopCb();
+    }
   }
 }

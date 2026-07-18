@@ -37,6 +37,39 @@ test.describe('Hub-based game synchronization', () => {
     expect(result.sentToB.filter((msg) => msg.type === 'arena-input')).toEqual([]);
   });
 
+  test('pong player labels render usernames as text instead of HTML', async ({ page }) => {
+    await loadHarness(page);
+
+    const result = await page.evaluate(() => {
+      const { PongGame } = window.__rpjsHubSync;
+      const game = Object.create(PongGame.prototype);
+      game.network = {
+        myId: 'visitor-a',
+        myUser: { username: '<img src=x onerror=alert(1)>', color: '#0ff' },
+        getUserList: () => [{
+          id: 'visitor-b', username: '<b>Opponent</b>', color: '#f80',
+        }],
+      };
+      game.opponentPeerId = 'visitor-b';
+      game.isInitiator = true;
+      game.el = document.createElement('div');
+      game.el.innerHTML = '<div id="rpjs-pong-players"></div>';
+
+      game._updatePlayerNames();
+      const labels = game.el.querySelector('#rpjs-pong-players');
+      return {
+        text: labels.textContent,
+        imageCount: labels.querySelectorAll('img').length,
+        boldCount: labels.querySelectorAll('b').length,
+      };
+    });
+
+    expect(result.imageCount).toBe(0);
+    expect(result.boldCount).toBe(0);
+    expect(result.text).toContain('<img src=x onerror=alert(1)>');
+    expect(result.text).toContain('<b>Opponent</b>');
+  });
+
   test('hub stamps arena state with monotonic sync metadata and visitors ignore stale states', async ({ page }) => {
     await loadHarness(page);
 

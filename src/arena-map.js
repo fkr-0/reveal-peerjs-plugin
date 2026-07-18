@@ -1,12 +1,5 @@
 import { WALL_COUNT, WALL_MIN_LEN, WALL_MAX_LEN, PLAYER_RADIUS } from './arena-rules.js';
-
-function seededRandom(seed) {
-  let s = seed;
-  return function () {
-    s = (s * 1103515245 + 12345) & 0x7fffffff;
-    return s / 0x7fffffff;
-  };
-}
+import { createSeededRandom } from './arena-rng.js';
 
 function dist(x1, y1, x2, y2) {
   return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
@@ -60,7 +53,7 @@ function clearRatio(walls, W, H) {
 }
 
 export function generatePlayableMap(W, H, seed, playerCount) {
-  const rng = seededRandom(seed);
+  const rng = createSeededRandom(seed);
   const spawnCount = Math.max(1, Math.min(8, playerCount || 1));
   const spawns = buildSpawnPoints(W, H, spawnCount);
   const margin = 72;

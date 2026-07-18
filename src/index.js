@@ -26,7 +26,6 @@ const RevealPeerJS = () => ({
   id: 'peerjs',
 
   init(deck) {
-    console.log('[RevealPeerJS] Plugin initializing...');
     injectStyles();
 
     const settings = loadSettings();
@@ -63,9 +62,7 @@ const RevealPeerJS = () => ({
       <button id="rpjs-btn-lobby" type="button" title="Lobby & Chat" aria-label="Lobby & Chat">${CHAT_ICON}</button>
       <button id="rpjs-btn-settings" type="button" title="Settings" aria-label="Settings">${USER_ICON}</button>
     `;
-    console.log('[RevealPeerJS] Creating toolbar and appending to body...');
     document.body.appendChild(toolbar);
-    console.log('[RevealPeerJS] Toolbar appended. Visible:', toolbar.offsetParent !== null);
 
     // ========== Toolbar button events ==========
     document.getElementById('rpjs-btn-lobby').addEventListener('click', () => {
@@ -104,8 +101,6 @@ const RevealPeerJS = () => ({
 
     // ========== Connect to lobby ==========
     network.on('connected', ({ isHub, user }) => {
-      console.log(`[RevealPeerJS] Connected as ${isHub ? 'HUB' : 'VISITOR'} (${user.username})`);
-
       // Update status dot
       const dot = document.getElementById('rpjs-status-dot');
       if (dot) dot.classList.remove('rpjs-connecting', 'rpjs-offline');
@@ -163,13 +158,6 @@ const RevealPeerJS = () => ({
     // Hub: jump slide
     network.on('jump-slide', (payload) => {
       deck.slide(payload.indexh, payload.indexv);
-    });
-
-    // Follow mode
-    network.on('follow-mode', ({ active }) => {
-      if (active) {
-        console.log('[RevealPeerJS] Follow mode enabled');
-      }
     });
 
     // Visitor: poll start

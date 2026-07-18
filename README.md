@@ -164,7 +164,8 @@ Reveal.initialize({
 2. The Hub clicks **"Launch Arena"** and every lobby member joins the same authoritative round.
 3. Use **W/A/S/D** or **H/J/K/L** to move, the **mouse** to aim, and **click/Space** to fire.
 4. Collect weighted item drops for healing, armor, temporary effects, and weapon changes.
-5. The last player standing wins; a one-player lobby automatically enters escalating zombie survival mode.
+5. Track kills, damage, pickups, and round events in the synchronized HUD, scoreboard, and event feed.
+6. The last player standing wins; a one-player lobby automatically enters escalating zombie survival mode.
 
 Character archetypes:
 
@@ -181,7 +182,7 @@ Item families:
 - **Timed effects:** HASTE, AMP, MAGNET, and REGEN.
 - **Weapons:** RAPID, SPREAD, and SNIPER.
 
-The Hub owns character validation, movement limits, weapon statistics, item pickups, timed effects, collisions, and result calculation. Visitors only submit bounded input commands and reconcile from Hub snapshots.
+The Hub owns character validation, movement limits, weapon statistics, item pickups, timed effects, collisions, statistics, and result calculation. Visitors only submit bounded input commands and reconcile from Hub snapshots. All simulation randomness after round creation is derived from the shared Arena seed, making a reported round reproducible.
 
 ## 🔧 Development
 
@@ -192,6 +193,9 @@ git clone https://github.com/yourusername/reveal-peerjs-plugin.git
 cd reveal-peerjs-plugin
 pnpm install
 ```
+
+The local example uses the pinned Reveal.js development dependency, so development and Playwright runs do not require a CDN connection.
+The repository enforces pnpm and uses `pnpm-lock.yaml` as its only dependency lockfile.
 
 ### Available Scripts
 
@@ -208,11 +212,14 @@ pnpm dev-server
 # Deterministic fixed-build server used by Playwright
 pnpm test-server
 
-# Preview - build once and serve example
+# Preview - build once and serve the project-root example
 pnpm preview
 
 # Run e2e tests
 pnpm test:e2e
+
+# Parse-check source, scripts, and tests
+pnpm check
 
 # Run e2e tests in UI mode
 pnpm test:e2e:ui
@@ -238,7 +245,9 @@ reveal-peerjs-plugin/
 │   ├── pong.js            # Pong mini-game
 │   ├── arena-game.js      # Arena lifecycle and Hub-authoritative simulation
 │   ├── arena-rules.js     # Character, weapon, item, and balance configuration
+│   ├── arena-rng.js       # Seeded deterministic Arena random generation
 │   ├── arena-sim.js       # Pure simulation and pickup primitives
+│   ├── arena-state.js     # Authoritative snapshots, reconciliation, and standings
 │   └── arena-render.js    # Canvas, HUD, scoreboard, and item rendering
 ├── example/
 │   └── index.html         # Demo presentation
@@ -277,7 +286,7 @@ pnpm test:e2e:headed
 - **Multiplayer** - Hub/visitor roles, multi-user lobby, chat propagation
 - **Hub Controls** - Menu navigation, poll launching
 - **Hub Authority** - Connection-bound identity, epoch/sequence ordering, stale-state rejection, and session isolation
-- **Games** - Pong relay lifecycle, Arena reconciliation, bounded commands, disconnect/leave cleanup, and swept collision detection
+- **Games** - Pong relay lifecycle, Arena reconciliation, deterministic random simulation, statistics, bounded commands, disconnect/leave cleanup, and swept collision detection
 - **Responsive Design** - Mobile, tablet, desktop viewports
 - **Keyboard Navigation** - Tab focus, Escape to close
 

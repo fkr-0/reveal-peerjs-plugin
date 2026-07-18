@@ -77,20 +77,21 @@ export function applyBulletCollisions(state, onHit) {
       const d = bulletTargetDistance(b, player);
       if (d >= hitRadius) continue;
 
-      const rawDamage = b.damage || 25;
-      const armorAbsorb = Math.min(player.armor || 0, Math.ceil(rawDamage * 0.6));
-      player.armor = Math.max(0, (player.armor || 0) - armorAbsorb);
-      player.hp -= (rawDamage - armorAbsorb);
-      if (player.hp <= 0) {
-        player.hp = 0;
-        player.eliminated = true;
+      const damage = applyDamage(player, b.damage || 25);
+      const attacker = players.get(b.from);
+      if (attacker) {
+        attacker.damageDealt = (attacker.damageDealt || 0) + damage.totalDamage;
+        attacker.kills = (attacker.kills || 0) + (damage.newlyEliminated ? 1 : 0);
       }
 
       const hitData = {
         targetId: pid,
+        sourceId: b.from,
         hp: player.hp,
         armor: player.armor,
         eliminated: player.eliminated,
+        newlyEliminated: damage.newlyEliminated,
+        damage: damage.totalDamage,
         x: player.x,
         y: player.y,
         color: player.color,
@@ -106,20 +107,51 @@ export function applyBulletCollisions(state, onHit) {
 
 }
 
+export function applyDamage(player, rawDamage, armorRatio = 0.6) {
+  const amount = Number.isFinite(rawDamage) ? Math.max(0, rawDamage) : 0;
+  const absorbRatio = Number.isFinite(armorRatio) ? clamp(armorRatio, 0, 1) : 0.6;
+  const wasEliminated = !!player.eliminated;
+  const armorBefore = Math.max(0, player.armor || 0);
+  const hpBefore = Math.max(0, player.hp || 0);
+  const armorDamage = Math.min(armorBefore, Math.ceil(amount * absorbRatio));
+  const hpDamage = Math.min(hpBefore, Math.max(0, amount - armorDamage));
+
+  player.armor = armorBefore - armorDamage;
+  player.hp = hpBefore - hpDamage;
+  player.eliminated = player.hp <= 0;
+  if (player.eliminated) player.hp = 0;
+
+  const newlyEliminated = player.eliminated && !wasEliminated;
+  if (newlyEliminated) player.deaths = (player.deaths || 0) + 1;
+  player.damageTaken = (player.damageTaken || 0) + armorDamage + hpDamage;
+
+  return {
+    armorDamage,
+    hpDamage,
+    totalDamage: armorDamage + hpDamage,
+    newlyEliminated,
+    eliminated: player.eliminated,
+  };
+}
+
 export function spawnItem(state, lineCircleIntersect) {
   if (state.items.length >= MAX_ITEMS) return;
-  const key = chooseWeightedItemType();
+  const random = state.random || Math.random;
+  const key = chooseWeightedItemType(random);
   const margin = 80;
   for (let i = 0; i < 10; i++) {
-    const x = margin + Math.random() * (state.W - margin * 2);
-    const y = margin + Math.random() * (state.H - margin * 2);
+    const x = margin + random() * (state.W - margin * 2);
+    const y = margin + random() * (state.H - margin * 2);
     const onPlayer = Array.from(state.players.values()).some(p => !p.eliminated && dist(x, y, p.x, p.y) < 100);
     if (onPlayer) continue;
     const blocked = state.walls.some(w => lineCircleIntersect(w.x1, w.y1, w.x2, w.y2, x, y, ITEM_RADIUS + 4));
     if (blocked) continue;
-    state.items.push({ id: `it-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, type: key, x, y, ttl: 800 });
-    return;
+    const id = state.createId ? state.createId('item') : `item-${Date.now()}-${i}`;
+    const item = { id, type: key, x, y, ttl: 800 };
+    state.items.push(item);
+    return item;
   }
+  return null;
 }
 
 export function applyItemPickup(player, item) {
@@ -129,6 +161,7 @@ export function applyItemPickup(player, item) {
   const maxHp = player.maxHp || BASE_HP;
   const maxArmor = player.maxArmor || MAX_ARMOR;
   const durationMultiplier = player.itemDurationMultiplier || 1;
+  player.pickups = (player.pickups || 0) + 1;
   if (t.kind === 'heal') {
     player.hp = clamp((player.hp || 0) + t.value, 0, maxHp);
     return `${player.username} picked ${t.label}`;
@@ -168,7 +201,7 @@ export function updatePlayerEffects(player, now = Date.now()) {
   );
 }
 
-export function updateItems(state, lineCircleIntersect, setStatus) {
+export function updateItems(state, lineCircleIntersect, onPickup) {
   const now = Date.now();
   if (now >= state.itemSpawnAt) {
     spawnItem(state, lineCircleIntersect);
@@ -188,7 +221,7 @@ export function updateItems(state, lineCircleIntersect, setStatus) {
       const magnetMultiplier = (player.magnetUntil || 0) > now ? MAGNET_PICKUP_MULTIPLIER : 1;
       if (dist(item.x, item.y, player.x, player.y) > baseRadius * characterMultiplier * magnetMultiplier) continue;
       const status = applyItemPickup(player, item);
-      if (status) setStatus(status);
+      if (status) onPickup({ text: status, player, item });
       state.items.splice(i, 1);
       break;
     }
@@ -206,6 +239,4 @@ export function bulletTail(b) {
     tailY: b.y - (b.vy / speed) * BULLET_LENGTH,
   };
 }
-
-export { PLAYER_RADIUS, BULLET_LENGTH, BASE_HP, MAX_ARMOR };
 

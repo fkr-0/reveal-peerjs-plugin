@@ -56,6 +56,11 @@ test.describe('Accessibility And Arena', () => {
     const hud = page.locator('#rpjs-arena-player-count');
     await expect(hud).toContainText('HP');
     await expect(hud).toContainText('Alive');
+    await expect(hud).toContainText('K 0');
+
+    const eventFeed = page.locator('#rpjs-arena-event-feed');
+    await expect(eventFeed).toHaveAttribute('aria-live', 'polite');
+    await expect(eventFeed).toContainText(/Arena round started|Zombie survival started/);
 
     await page.keyboard.press('Escape');
     await expect(overlay).not.toBeVisible();

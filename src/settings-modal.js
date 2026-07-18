@@ -2,8 +2,8 @@
  * Settings Modal UI
  */
 
-import { USER_ICON, CLOSE_ICON } from './icons.js';
-import { loadSettings, saveSettings } from './settings.js';
+import { CLOSE_ICON } from './icons.js';
+import { saveSettings } from './settings.js';
 import { CHARACTER_TYPES, getCharacterConfig, normalizeCharacterType } from './arena-rules.js';
 
 export class SettingsModal {

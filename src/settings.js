@@ -13,10 +13,6 @@ const DEFAULTS = {
   goOffline: false,
 };
 
-function generateUsername(index) {
-  return `slide-visitor#${index}`;
-}
-
 export function loadSettings() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);

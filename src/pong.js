@@ -113,11 +113,16 @@ export class PongGame {
     const oppName = opponent ? opponent.username : 'Opponent';
 
     const playersEl = this.el.querySelector('#rpjs-pong-players');
-    if (this.isInitiator) {
-      playersEl.innerHTML = `<span style="color:${this.network.myUser.color}">${myName} (Left)</span> vs <span style="color:${opponent?.color || '#fff'}">${oppName} (Right)</span>`;
-    } else {
-      playersEl.innerHTML = `<span style="color:${opponent?.color || '#fff'}">${oppName} (Left)</span> vs <span style="color:${this.network.myUser.color}">${myName} (Right)</span>`;
-    }
+    const left = document.createElement('span');
+    const right = document.createElement('span');
+    const myColor = this.network.myUser.color;
+    const opponentColor = opponent?.color || '#fff';
+
+    left.style.color = this.isInitiator ? myColor : opponentColor;
+    left.textContent = `${this.isInitiator ? myName : oppName} (Left)`;
+    right.style.color = this.isInitiator ? opponentColor : myColor;
+    right.textContent = `${this.isInitiator ? oppName : myName} (Right)`;
+    playersEl.replaceChildren(left, document.createTextNode(' vs '), right);
   }
 
   _resize() {

@@ -289,20 +289,24 @@ export function updateArenaScoreboard(game) {
   const myId = game.network.myId;
   let html = '<div style="font-weight:600;margin-bottom:4px;color:rgba(255,255,255,0.9)">Players</div>';
   const sortedPlayers = Array.from(game.players.entries()).sort((a, b) => {
+    if ((b[1].kills || 0) !== (a[1].kills || 0)) return (b[1].kills || 0) - (a[1].kills || 0);
     if (a[1].eliminated && !b[1].eliminated) return 1;
     if (!a[1].eliminated && b[1].eliminated) return -1;
+    if ((b[1].damageDealt || 0) !== (a[1].damageDealt || 0)) return (b[1].damageDealt || 0) - (a[1].damageDealt || 0);
     return (b[1].hp + b[1].armor) - (a[1].hp + a[1].armor);
   });
   for (const [id, p] of sortedPlayers) {
     const isMe = id === myId;
     const hpClass = p.eliminated ? 'hit' : p.hp < 45 ? 'hit' : 'alive';
     const status = p.eliminated ? 'OUT' : `HP ${Math.max(0, Math.round(p.hp))}`;
+    const kills = Math.max(0, Math.round(p.kills || 0));
+    const damage = Math.max(0, Math.round(p.damageDealt || 0));
     html += `<div class="rpjs-arena-scoreboard-row">
       <span class="rpjs-arena-scoreboard-name">
         <span style="width:6px;height:6px;border-radius:50%;background:${p.color};display:inline-block"></span>
         <span style="${isMe ? 'font-weight:600' : ''}">${escapeHtml(p.username)} <small style="opacity:.58">${escapeHtml(p.characterGlyph || 'V')}</small></span>
       </span>
-      <span class="rpjs-arena-scoreboard-hp ${hpClass}" title="${escapeHtml(p.characterLabel || 'Vanguard')} | Armor ${Math.round(p.armor || 0)} | Weapon ${escapeHtml(p.weapon || 'blaster')}">${status}</span>
+      <span class="rpjs-arena-scoreboard-hp ${hpClass}" title="${escapeHtml(p.characterLabel || 'Vanguard')} | Armor ${Math.round(p.armor || 0)} | Weapon ${escapeHtml(p.weapon || 'blaster')} | Damage ${damage} | Pickups ${Math.round(p.pickups || 0)}">K${kills} · ${status}</span>
     </div>`;
   }
   if (game.zombieMode) {
@@ -310,7 +314,7 @@ export function updateArenaScoreboard(game) {
     html += `<div class="rpjs-arena-scoreboard-row"><span>Wave</span><span>${game._zombieWave || 1}</span></div>`;
     html += `<div class="rpjs-arena-scoreboard-row"><span>Defeated</span><span>${game._zombiesDefeated || 0}</span></div>`;
   }
-  sb.innerHTML = html;
+  commitHtmlIfChanged(sb, html);
 }
 
 export function updateArenaHud(game) {
@@ -322,6 +326,7 @@ export function updateArenaHud(game) {
   const armor = me ? Math.round(me.armor || 0) : 0;
   const weapon = me ? (me.weapon || 'blaster').toUpperCase() : 'BLASTER';
   const character = me ? (me.characterLabel || 'Vanguard') : 'Vanguard';
+  const kills = me ? Math.round(me.kills || 0) : 0;
   const now = Date.now();
   const effects = me ? [
     (me.hasteUntil || 0) > now ? 'HASTE' : '',
@@ -331,7 +336,27 @@ export function updateArenaHud(game) {
   ].filter(Boolean) : [];
   const effectText = effects.length ? ` · ${effects.join('+')}` : '';
   const mode = game.zombieMode ? ` · W${game._zombieWave || 1} · ZM ${Math.round(game._zombiesPerMin)}/min` : '';
-  hudCount.textContent = `Alive ${alive}/${game.players.size} · ${character} · HP ${hp} · AR ${armor} · ${weapon}${effectText}${mode}`;
+  const text = `Alive ${alive}/${game.players.size} · K ${kills} · ${character} · HP ${hp} · AR ${armor} · ${weapon}${effectText}${mode}`;
+  if (hudCount.textContent !== text) hudCount.textContent = text;
+}
+
+export function updateArenaEventFeed(game) {
+  const feed = game.el?.querySelector('#rpjs-arena-event-feed');
+  if (!feed) return;
+  const events = (game._events || []).slice(-5);
+  const html = events.map(event => `
+    <div class="rpjs-arena-event rpjs-arena-event-${escapeHtml(event.kind || 'info')}">
+      <span class="rpjs-arena-event-dot" style="background:${escapeHtml(event.color || '#fff')}"></span>
+      <span>${escapeHtml(event.text)}</span>
+    </div>
+  `).join('');
+  commitHtmlIfChanged(feed, html);
+}
+
+function commitHtmlIfChanged(element, html) {
+  if (element.__rpjsRenderedHtml === html) return;
+  element.__rpjsRenderedHtml = html;
+  element.innerHTML = html;
 }
 
 function escapeHtml(value) {

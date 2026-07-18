@@ -1,13 +1,20 @@
 import { test, expect } from '@playwright/test';
 import { generatePlayableMap } from '../src/arena-map.js';
-import { ArenaGame, createArenaPlayer } from '../src/arena-game.js';
+import { ArenaGame, collectArenaUsers, createArenaPlayer } from '../src/arena-game.js';
 import {
+  applyDamage,
   applyBulletCollisions,
   applyItemPickup,
   bulletTail,
+  spawnItem,
   updateBullets,
   updatePlayerEffects,
 } from '../src/arena-sim.js';
+import { createSeededRandom } from '../src/arena-rng.js';
+import {
+  createArenaPlayerSnapshot,
+  reconcileArenaPlayer,
+} from '../src/arena-state.js';
 import {
   BASE_HP,
   BULLET_LENGTH,
@@ -41,6 +48,122 @@ test.describe('arena simulation primitives', () => {
     }
   });
 
+  test('Arena stop callback fires once per round even when cleanup is repeated', () => {
+    let stops = 0;
+    const game = Object.create(ArenaGame.prototype);
+    Object.assign(game, {
+      running: false,
+      isHub: false,
+      gameId: null,
+      _leaveSent: true,
+      network: {},
+      animFrame: null,
+      _stateBroadcastInterval: null,
+      _inputSendInterval: null,
+      _shootTouchInterval: null,
+      _unbindEvents: () => {},
+      _unbindEndCloseHandler: () => {},
+      el: null,
+      players: new Map(),
+      bullets: [],
+      items: [],
+      zombies: [],
+      _hitFlashes: [],
+      _sparks: [],
+      _events: [],
+      _stopNotified: false,
+      _onStopCb: () => { stops++; },
+    });
+
+    game.stop();
+    game.stop();
+
+    expect(stops).toBe(1);
+  });
+
+  test('Arena user collection neither duplicates self nor omits a visitor self record', () => {
+    const hubUser = { id: 'hub', username: 'Hub', isHub: true, number: 0, arenaCharacter: 'vanguard' };
+    const visitorUser = { id: 'visitor', username: 'Visitor', isHub: false, number: 1, arenaCharacter: 'scout' };
+
+    expect(collectArenaUsers({
+      myUser: hubUser,
+      getUserList: () => [hubUser, visitorUser, { ...visitorUser }],
+    }).map(user => user.id)).toEqual(['hub', 'visitor']);
+
+    expect(collectArenaUsers({
+      myUser: visitorUser,
+      getUserList: () => [hubUser],
+    }).map(user => user.id)).toEqual(['hub', 'visitor']);
+  });
+
+  test('end-screen cleanup removes both close listeners after either path fires', () => {
+    const removed = [];
+    const originalDocument = globalThis.document;
+    globalThis.document = {
+      removeEventListener: (event, handler) => removed.push(['document', event, handler]),
+    };
+    const handler = () => {};
+    const game = Object.create(ArenaGame.prototype);
+    game._endCloseHandler = handler;
+    game.el = {
+      removeEventListener: (event, received) => removed.push(['element', event, received]),
+    };
+
+    try {
+      game._unbindEndCloseHandler();
+    } finally {
+      globalThis.document = originalDocument;
+    }
+
+    expect(removed).toEqual([
+      ['element', 'click', handler],
+      ['document', 'keydown', handler],
+    ]);
+    expect(game._endCloseHandler).toBeNull();
+  });
+
+  test('seeded Arena randomness reproduces item positions and identifiers', () => {
+    const makeState = () => {
+      const random = createSeededRandom(4242);
+      let sequence = 0;
+      return {
+        items: [], players: new Map(), walls: [], W: 800, H: 500,
+        random,
+        createId: prefix => `${prefix}-${++sequence}`,
+      };
+    };
+    const first = makeState();
+    const second = makeState();
+
+    expect(spawnItem(first, () => false)).toEqual(spawnItem(second, () => false));
+    expect(first.items).toEqual(second.items);
+  });
+
+  test('central damage handling tracks armor, damage taken, and one death', () => {
+    const player = { hp: 20, armor: 10, eliminated: false, deaths: 0, damageTaken: 0 };
+
+    const first = applyDamage(player, 20);
+    const second = applyDamage(player, 20);
+
+    expect(first).toMatchObject({ armorDamage: 10, hpDamage: 10, totalDamage: 20, newlyEliminated: false });
+    expect(second).toMatchObject({ armorDamage: 0, hpDamage: 10, totalDamage: 10, newlyEliminated: true });
+    expect(player).toMatchObject({ hp: 0, armor: 0, eliminated: true, deaths: 1, damageTaken: 30 });
+  });
+
+  test('Arena player snapshots preserve authoritative stats and tolerate partial state', () => {
+    const player = createArenaPlayer({
+      username: 'Mika', color: '#0ff', arenaCharacter: 'scout',
+    }, { x: 12.34, y: 56.78 });
+    Object.assign(player, { kills: 2, damageDealt: 91.5, pickups: 3 });
+
+    const snapshot = createArenaPlayerSnapshot(player);
+    const reconciled = reconcileArenaPlayer(null, snapshot);
+
+    expect(snapshot).toMatchObject({ x: 12.3, y: 56.8, kills: 2, damageDealt: 91.5, pickups: 3 });
+    expect(reconciled).toMatchObject({ character: 'scout', kills: 2, damageDealt: 91.5, pickups: 3 });
+    expect(reconcileArenaPlayer(reconciled, { hp: 42 })).toMatchObject({ hp: 42, kills: 2, character: 'scout' });
+  });
+
   test('bullet collisions apply armor mitigation before hp damage and emit one hit', () => {
     const players = new Map([
       ['attacker', { x: 0, y: 0, hp: BASE_HP, armor: 0, eliminated: false }],
@@ -54,8 +177,13 @@ test.describe('arena simulation primitives', () => {
     applyBulletCollisions({ bullets, players, sparks, hitFlashes }, hit => hits.push(hit));
 
     expect(bullets).toHaveLength(0);
-    expect(hits).toEqual([{ targetId: 'target', hp: 80, armor: 0, eliminated: false, x: 10, y: 0, color: '#fff' }]);
+    expect(hits).toEqual([{
+      targetId: 'target', sourceId: 'attacker', hp: 80, armor: 0,
+      eliminated: false, newlyEliminated: false, damage: 50,
+      x: 10, y: 0, color: '#fff',
+    }]);
     expect(players.get('target')).toMatchObject({ hp: 80, armor: 0, eliminated: false });
+    expect(players.get('attacker')).toMatchObject({ damageDealt: 50, kills: 0 });
     expect(sparks).toHaveLength(1);
     expect(hitFlashes).toHaveLength(1);
   });

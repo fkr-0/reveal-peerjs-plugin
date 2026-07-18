@@ -48,3 +48,7 @@ Then open `http://localhost:8080/example/` in two windows to see lobby, chat, hu
 ## Arena 1.2
 
 Select one of five Arena characters in Settings, then launch a Hub-authoritative multiplayer round or solo zombie survival session. Arena 1.2 adds weighted healing, armor, weapon, HASTE, AMP, MAGNET, and REGEN pickups; dynamic character stats and collision sizes; effect indicators; and an in-game item legend.
+
+## Arena 1.3
+
+Arena rounds now expose synchronized kills, damage, pickups, and a live event feed. The Hub uses the round seed for all item, zombie, and reward randomness, while shared snapshot helpers keep character statistics and effects consistent across peers. Zombie bites also use the same armor-aware damage pipeline as projectiles.

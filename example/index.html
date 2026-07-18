@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>RevealPeerJS Demo Presentation</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css">
+  <link rel="stylesheet" href="../node_modules/reveal.js/dist/reveal.css">
+  <link rel="stylesheet" href="../node_modules/reveal.js/dist/theme/black.css">
   <style>
     .reveal h1, .reveal h2, .reveal h3 { text-transform: none; }
     .reveal section { text-align: left; }
@@ -174,11 +174,13 @@
         <li><strong>Click</strong> or <strong>Space</strong> fires toward your cursor</li>
         <li>Bullets stop when they hit a <strong>wall</strong>, <strong>player</strong>, or leave the screen</li>
         <li>Collect healing, armor, weapon, HASTE, AMP, MAGNET, and REGEN drops</li>
+        <li>Follow kills, pickups, wave milestones, and departures in the live event feed</li>
+        <li>The scoreboard tracks authoritative kills, health, damage, and pickups</li>
         <li>A one-player lobby switches to escalating <strong>zombie survival</strong></li>
         <li>Last player standing wins!</li>
       </ul>
       <p style="margin-top: 15px; color: rgba(255,255,255,0.5); font-size: 0.8em">
-        The Hub validates character profiles and owns movement, weapons, pickups, effects, collision detection, and results.
+        The Hub validates character profiles and owns movement, weapons, pickups, effects, statistics, collision detection, seeded randomness, and results.
       </p>
     </section>
 
@@ -263,7 +265,7 @@ Reveal.initialize({
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="../node_modules/reveal.js/dist/reveal.js"></script>
 <script src="../dist/reveal-peerjs.js"></script>
 <script>
   Reveal.initialize({

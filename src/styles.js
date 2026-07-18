@@ -1354,6 +1354,41 @@ export function injectStyles() {
       font-variant-numeric: tabular-nums;
     }
 
+    .rpjs-arena-event-feed {
+      position: absolute;
+      top: 84px;
+      left: 16px;
+      width: min(340px, calc(100vw - 32px));
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      pointer-events: none;
+      z-index: 10002;
+    }
+
+    .rpjs-arena-event {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      width: fit-content;
+      max-width: 100%;
+      padding: 5px 8px;
+      border-radius: 6px;
+      background: rgba(4, 8, 14, 0.66);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: rgba(255, 255, 255, 0.84);
+      font-size: 10px;
+      line-height: 1.25;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.24);
+    }
+
+    .rpjs-arena-event-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex: 0 0 auto;
+    }
+
     .rpjs-arena-item-legend {
       position: absolute;
       left: 16px;

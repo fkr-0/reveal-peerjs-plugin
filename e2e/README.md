@@ -21,6 +21,9 @@ pnpm test:e2e:ui
 
 # Run tests in headed mode (show browser)
 pnpm test:e2e:headed
+
+# Syntax-check source, scripts, and tests
+pnpm check
 ```
 
 ## Test Structure
