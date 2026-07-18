@@ -251,7 +251,7 @@ test.describe('Hub-based game synchronization', () => {
       }, conn);
       hub._handleHubMessage({
         type: MSG.USERNAME_UPDATE,
-        payload: { id: 'visitor-b', username: 'Alice 2', color: '#123456' },
+        payload: { id: 'visitor-b', username: 'Alice 2', color: '#123456', arenaCharacter: 'forged-class' },
       }, conn);
 
       return {
@@ -264,7 +264,7 @@ test.describe('Hub-based game synchronization', () => {
 
     expect(result.chat).toMatchObject({ from: 'visitor-a', username: 'Alice', color: '#0ff', text: 'hello' });
     expect(result.answer).toMatchObject({ from: 'visitor-a', username: 'Alice', pollId: 'poll-1', answer: 'A' });
-    expect(result.alice).toMatchObject({ username: 'Alice 2', color: '#123456' });
+    expect(result.alice).toMatchObject({ username: 'Alice 2', color: '#123456', arenaCharacter: 'vanguard' });
     expect(result.bob).toMatchObject({ username: 'Bob', color: '#f80' });
   });
 

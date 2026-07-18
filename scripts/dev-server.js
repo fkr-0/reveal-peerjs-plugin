@@ -9,14 +9,14 @@
 
 import { spawn, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, extname, join, resolve, sep } from 'path';
 import { createServer } from 'http';
 import { readFileSync, existsSync, statSync } from 'fs';
-import { extname } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const rootDir = join(__dirname, '..');
+const watchMode = !process.argv.includes('--no-watch');
 
 const PORT = 8080;
 const MIME_TYPES = {
@@ -41,7 +41,12 @@ function getMimeType(filePath) {
 }
 
 function serveFile(res, filePath) {
-  const fullPath = join(rootDir, filePath);
+  const fullPath = resolve(rootDir, `.${filePath}`);
+  if (fullPath !== rootDir && !fullPath.startsWith(`${rootDir}${sep}`)) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    res.end('403 Forbidden');
+    return;
+  }
 
   if (!existsSync(fullPath)) {
     res.writeHead(404, { 'Content-Type': 'text/plain' });
@@ -93,7 +98,7 @@ const server = createServer((req, res) => {
 
 // Playwright treats an open port as a ready server. Build once before listening
 // so the first test can never observe a temporarily missing dist bundle.
-const initialBuild = spawnSync('npm', ['run', 'build'], {
+const initialBuild = spawnSync('pnpm', ['build'], {
   cwd: rootDir,
   shell: false,
   stdio: 'inherit',
@@ -108,22 +113,25 @@ server.listen(PORT, () => {
   console.log('\n  RevealPeerJS Dev Server\n');
   console.log(`  Serving at http://localhost:${PORT}`);
   console.log(`  Example: http://localhost:${PORT}/example/`);
-  console.log('\n  Starting build in watch mode...\n');
+  console.log(watchMode ? '\n  Starting build in watch mode...\n' : '\n  Serving fixed production build for tests.\n');
 });
 
-// Build process (vite build --watch)
-const build = spawn('npm', ['run', 'dev'], {
-  cwd: rootDir,
-  shell: false,
-  stdio: 'pipe',
-});
+// Interactive development watches the production bundle. Test mode serves the
+// initial immutable build so no request can race an output rewrite.
+const build = watchMode
+  ? spawn('pnpm', ['dev'], {
+    cwd: rootDir,
+    shell: false,
+    stdio: 'pipe',
+  })
+  : null;
 
-build.stdout.on('data', (data) => {
+build?.stdout.on('data', (data) => {
   const msg = data.toString().trim();
   if (msg) console.log(`[build] ${msg}`);
 });
 
-build.stderr.on('data', (data) => {
+build?.stderr.on('data', (data) => {
   const msg = data.toString().trim();
   if (msg) console.error(`[build] ${msg}`);
 });
@@ -131,7 +139,7 @@ build.stderr.on('data', (data) => {
 // Handle exit
 const cleanup = () => {
   console.log('\n  Shutting down dev server...');
-  build.kill();
+  build?.kill();
   server.close();
   process.exit(0);
 };
@@ -139,14 +147,16 @@ const cleanup = () => {
 process.on('SIGINT', cleanup);
 process.on('SIGTERM', cleanup);
 
-build.on('exit', (code) => {
+build?.on('exit', (code) => {
   console.log(`Build process exited with code ${code}`);
   cleanup();
 });
 
 setTimeout(() => {
   console.log('\n  Dev server ready!\n');
-  console.log('  - Plugin builds automatically on file changes');
+  console.log(watchMode
+    ? '  - Plugin builds automatically on file changes'
+    : '  - Fixed build mode: no output changes during test execution');
   console.log('  - Refresh example pages to see updates');
   console.log('  - Press Ctrl+C to stop\n');
 }, 1000);

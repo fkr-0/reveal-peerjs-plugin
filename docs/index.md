@@ -39,8 +39,12 @@ Reveal.initialize({
 - Run locally:
 
 ```bash
-npm install
-npm run dev-server
+pnpm install
+pnpm dev-server
 ```
 
 Then open `http://localhost:8080/example/` in two windows to see lobby, chat, hub controls, and games in action.
+
+## Arena 1.2
+
+Select one of five Arena characters in Settings, then launch a Hub-authoritative multiplayer round or solo zombie survival session. Arena 1.2 adds weighted healing, armor, weapon, HASTE, AMP, MAGNET, and REGEN pickups; dynamic character stats and collision sizes; effect indicators; and an in-game item legend.

@@ -2,15 +2,17 @@ import {
   PLAYER_RADIUS,
   BULLET_SPEED,
   BULLET_LENGTH,
-  HIT_RADIUS,
   BASE_HP,
   MAX_ARMOR,
   MAX_ITEMS,
   ITEM_SPAWN_MS,
   ITEM_RADIUS,
-  ITEM_PICKUP_RADIUS,
   WEAPON_BUFF_MS,
+  MAGNET_PICKUP_MULTIPLIER,
+  REGEN_TICK_MS,
+  REGEN_HP_PER_TICK,
   ITEM_TYPES,
+  chooseWeightedItemType,
 } from './arena-rules.js';
 
 export function clamp(v, min, max) {
@@ -71,8 +73,9 @@ export function applyBulletCollisions(state, onHit) {
     const b = bullets[bi];
     for (const [pid, player] of players) {
       if (pid === b.from || player.eliminated) continue;
+      const hitRadius = (player.radius || PLAYER_RADIUS) + 4;
       const d = bulletTargetDistance(b, player);
-      if (d >= HIT_RADIUS) continue;
+      if (d >= hitRadius) continue;
 
       const rawDamage = b.damage || 25;
       const armorAbsorb = Math.min(player.armor || 0, Math.ceil(rawDamage * 0.6));
@@ -100,12 +103,12 @@ export function applyBulletCollisions(state, onHit) {
       break;
     }
   }
+
 }
 
 export function spawnItem(state, lineCircleIntersect) {
   if (state.items.length >= MAX_ITEMS) return;
-  const keys = Object.keys(ITEM_TYPES);
-  const key = keys[Math.floor(Math.random() * keys.length)];
+  const key = chooseWeightedItemType();
   const margin = 80;
   for (let i = 0; i < 10; i++) {
     const x = margin + Math.random() * (state.W - margin * 2);
@@ -122,20 +125,47 @@ export function spawnItem(state, lineCircleIntersect) {
 export function applyItemPickup(player, item) {
   const t = ITEM_TYPES[item.type];
   if (!t) return null;
+  const now = Date.now();
+  const maxHp = player.maxHp || BASE_HP;
+  const maxArmor = player.maxArmor || MAX_ARMOR;
+  const durationMultiplier = player.itemDurationMultiplier || 1;
   if (t.kind === 'heal') {
-    player.hp = clamp((player.hp || 0) + t.value, 0, BASE_HP);
-    return `${player.username} picked HEAL`;
+    player.hp = clamp((player.hp || 0) + t.value, 0, maxHp);
+    return `${player.username} picked ${t.label}`;
   }
   if (t.kind === 'armor') {
-    player.armor = clamp((player.armor || 0) + t.value, 0, MAX_ARMOR);
-    return `${player.username} picked ARMOR`;
+    player.armor = clamp((player.armor || 0) + t.value, 0, maxArmor);
+    return `${player.username} picked ${t.label}`;
   }
   if (t.kind === 'weapon') {
     player.weapon = t.weapon;
-    player.weaponUntil = Date.now() + WEAPON_BUFF_MS;
+    player.weaponUntil = now + WEAPON_BUFF_MS * durationMultiplier;
+    return `${player.username} picked ${t.label}`;
+  }
+  if (t.kind === 'effect') {
+    player[`${t.effect}Until`] = now + t.duration * durationMultiplier;
+    if (t.effect === 'regen') player.lastRegenAt = now;
     return `${player.username} picked ${t.label}`;
   }
   return null;
+}
+
+export function updatePlayerEffects(player, now = Date.now()) {
+  if (!player || player.eliminated) return;
+  if ((player.regenUntil || 0) <= now) {
+    player.lastRegenAt = 0;
+    return;
+  }
+
+  const lastTick = player.lastRegenAt || now;
+  const ticks = Math.floor((now - lastTick) / REGEN_TICK_MS);
+  if (ticks <= 0) return;
+  player.lastRegenAt = lastTick + ticks * REGEN_TICK_MS;
+  player.hp = clamp(
+    (player.hp || 0) + ticks * REGEN_HP_PER_TICK,
+    0,
+    player.maxHp || BASE_HP,
+  );
 }
 
 export function updateItems(state, lineCircleIntersect, setStatus) {
@@ -153,12 +183,19 @@ export function updateItems(state, lineCircleIntersect, setStatus) {
     }
     for (const [, player] of state.players) {
       if (player.eliminated) continue;
-      if (dist(item.x, item.y, player.x, player.y) > ITEM_PICKUP_RADIUS) continue;
+      const baseRadius = (player.radius || PLAYER_RADIUS) + ITEM_RADIUS + 2;
+      const characterMultiplier = player.pickupRadiusMultiplier || 1;
+      const magnetMultiplier = (player.magnetUntil || 0) > now ? MAGNET_PICKUP_MULTIPLIER : 1;
+      if (dist(item.x, item.y, player.x, player.y) > baseRadius * characterMultiplier * magnetMultiplier) continue;
       const status = applyItemPickup(player, item);
       if (status) setStatus(status);
       state.items.splice(i, 1);
       break;
     }
+  }
+
+  for (const [, player] of state.players) {
+    updatePlayerEffects(player, now);
   }
 }
 

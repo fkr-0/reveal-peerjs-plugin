@@ -1,16 +1,19 @@
 import { test, expect } from '@playwright/test';
 import { generatePlayableMap } from '../src/arena-map.js';
-import { ArenaGame } from '../src/arena-game.js';
+import { ArenaGame, createArenaPlayer } from '../src/arena-game.js';
 import {
   applyBulletCollisions,
   applyItemPickup,
   bulletTail,
   updateBullets,
+  updatePlayerEffects,
 } from '../src/arena-sim.js';
 import {
   BASE_HP,
   BULLET_LENGTH,
+  CHARACTER_TYPES,
   PLAYER_RADIUS,
+  chooseWeightedItemType,
 } from '../src/arena-rules.js';
 
 function pointToSegmentDistance(px, py, x1, y1, x2, y2) {
@@ -69,6 +72,53 @@ test.describe('arena simulation primitives', () => {
     expect(applyItemPickup(player, { type: 'sniper' })).toBe('Mara picked SNIPER');
     expect(player.weapon).toBe('sniper');
     expect(player.weaponUntil).toBeGreaterThan(Date.now());
+  });
+
+  test('character presets create distinct authoritative player configurations', () => {
+    const scout = createArenaPlayer({
+      username: 'Scout', color: '#0ff', arenaCharacter: 'scout',
+    }, { x: 10, y: 20 });
+    const guardian = createArenaPlayer({
+      username: 'Guardian', color: '#f80', arenaCharacter: 'guardian',
+    }, { x: 30, y: 40 });
+    const fallback = createArenaPlayer({
+      username: 'Fallback', color: '#fff', arenaCharacter: 'forged-class',
+    }, { x: 50, y: 60 });
+    const prototypeKey = createArenaPlayer({
+      username: 'Prototype', color: '#fff', arenaCharacter: 'toString',
+    }, { x: 70, y: 80 });
+
+    expect(scout).toMatchObject({
+      character: 'scout', hp: 80, maxHp: 80, maxArmor: 70, weapon: 'rapid',
+    });
+    expect(scout.radius).toBeLessThan(PLAYER_RADIUS);
+    expect(guardian).toMatchObject({
+      character: 'guardian', hp: 135, maxHp: 135, armor: 40, maxArmor: 150,
+    });
+    expect(guardian.radius).toBeGreaterThan(PLAYER_RADIUS);
+    expect(fallback.character).toBe('vanguard');
+    expect(prototypeKey.character).toBe('vanguard');
+  });
+
+  test('timed items apply character-scaled effects and regeneration', () => {
+    const engineer = createArenaPlayer({
+      username: 'Engineer', color: '#fff', arenaCharacter: 'engineer',
+    }, { x: 0, y: 0 });
+    engineer.hp = 50;
+    const before = Date.now();
+
+    expect(applyItemPickup(engineer, { type: 'haste' })).toBe('Engineer picked HASTE');
+    expect(engineer.hasteUntil).toBeGreaterThan(before + 13000);
+
+    expect(applyItemPickup(engineer, { type: 'regen' })).toBe('Engineer picked REGEN');
+    updatePlayerEffects(engineer, engineer.lastRegenAt + 1500);
+    expect(engineer.hp).toBe(59);
+  });
+
+  test('weighted item selection is deterministic at distribution boundaries', () => {
+    expect(chooseWeightedItemType(() => 0)).toBe('heal');
+    expect(chooseWeightedItemType(() => 0.999999)).toBe('sniper');
+    expect(Object.keys(CHARACTER_TYPES)).toEqual(['vanguard', 'scout', 'guardian', 'ranger', 'engineer']);
   });
 
   test('bulletTail uses per-bullet speed so non-default weapons render correct trails', () => {

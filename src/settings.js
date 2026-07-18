@@ -7,6 +7,7 @@ const STORAGE_KEY = 'reveal-peerjs-settings';
 const DEFAULTS = {
   username: '',
   color: '#4fc3f7',
+  arenaCharacter: 'vanguard',
   darkMode: false,
   highContrast: false,
   goOffline: false,

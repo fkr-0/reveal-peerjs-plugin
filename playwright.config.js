@@ -33,9 +33,9 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: 'node scripts/dev-server.js',
+    command: 'pnpm test-server',
     url: 'http://localhost:8080',
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 120 * 1000,
   },
 });

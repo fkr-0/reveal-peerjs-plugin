@@ -37,6 +37,10 @@ import {
   BASE_HP,
   WEAPONS,
   ITEM_TYPES,
+  HASTE_SPEED_MULTIPLIER,
+  OVERCHARGE_DAMAGE_MULTIPLIER,
+  getCharacterConfig,
+  normalizeCharacterType,
 } from './arena-rules.js';
 import {
   clamp,
@@ -66,6 +70,41 @@ function lineCircleIntersect(x1, y1, x2, y2, cx, cy, r) {
   const t1 = (-b - disc) / (2 * a);
   const t2 = (-b + disc) / (2 * a);
   return (t1 >= 0 && t1 <= 1) || (t2 >= 0 && t2 <= 1) || (t1 < 0 && t2 > 1);
+}
+
+export function createArenaPlayer(user, spawn) {
+  const character = getCharacterConfig(user.arenaCharacter);
+  return {
+    x: spawn.x,
+    y: spawn.y,
+    angle: 0,
+    color: user.color,
+    username: user.username,
+    character: character.id,
+    characterLabel: character.label,
+    characterGlyph: character.glyph,
+    radius: PLAYER_RADIUS * character.sizeMultiplier,
+    maxHp: character.maxHp,
+    maxArmor: character.maxArmor,
+    hp: character.maxHp,
+    armor: character.startArmor,
+    baseWeapon: character.startingWeapon,
+    weapon: character.startingWeapon,
+    weaponUntil: 0,
+    speedMultiplier: character.speedMultiplier,
+    damageMultiplier: character.damageMultiplier,
+    cooldownMultiplier: character.cooldownMultiplier,
+    pickupRadiusMultiplier: character.pickupRadiusMultiplier,
+    itemDurationMultiplier: character.itemDurationMultiplier,
+    hasteUntil: 0,
+    overchargeUntil: 0,
+    magnetUntil: 0,
+    regenUntil: 0,
+    lastRegenAt: 0,
+    lastShootTime: 0,
+    lastInputAt: 0,
+    eliminated: false,
+  };
 }
 
 // Line-segment / line-segment intersection
@@ -179,6 +218,7 @@ export class ArenaGame {
         id: myUser.id,
         username: myUser.username,
         color: myUser.color,
+        arenaCharacter: normalizeCharacterType(myUser.arenaCharacter),
         isHub: myUser.isHub,
         number: myUser.number,
       });
@@ -192,19 +232,7 @@ export class ArenaGame {
     for (let i = 0; i < userList.length; i++) {
       const user = userList[i];
       const spawn = this._spawnPoints[i % this._spawnPoints.length] || { x: this.W / 2, y: this.H / 2 };
-      this.players.set(user.id, {
-        x: spawn.x, y: spawn.y,
-        angle: 0,
-        color: user.color,
-        username: user.username,
-        hp: BASE_HP,
-        armor: 0,
-        weapon: 'blaster',
-        weaponUntil: 0,
-        lastShootTime: 0,
-        lastInputAt: 0,
-        eliminated: false,
-      });
+      this.players.set(user.id, createArenaPlayer(user, spawn));
     }
 
     this.zombieMode = this.isHub && this.players.size === 1;
@@ -270,6 +298,13 @@ export class ArenaGame {
   _render() {
     if (this.el) this.el.remove();
 
+    const itemLegend = Object.values(ITEM_TYPES).map(item => `
+      <span class="rpjs-arena-legend-item">
+        <span class="rpjs-arena-legend-glyph" style="background:${item.color}">${item.glyph || item.label[0]}</span>
+        ${item.label}
+      </span>
+    `).join('');
+
     this.el = document.createElement('div');
     this.el.className = 'rpjs-arena-overlay';
     this.el.innerHTML = `
@@ -287,6 +322,10 @@ export class ArenaGame {
         <button class="rpjs-arena-shoot-btn" id="rpjs-arena-shoot-btn">FIRE</button>
       </div>
       <div class="rpjs-arena-scoreboard" id="rpjs-arena-scoreboard"></div>
+      <details class="rpjs-arena-item-legend">
+        <summary>Items</summary>
+        <div class="rpjs-arena-item-legend-grid">${itemLegend}</div>
+      </details>
     `;
 
     document.body.appendChild(this.el);
@@ -345,8 +384,9 @@ export class ArenaGame {
     dx = (dx / norm) * speed;
     dy = (dy / norm) * speed;
 
-    me.x = clamp(me.x + dx, PLAYER_RADIUS, this.W - PLAYER_RADIUS);
-    me.y = clamp(me.y + dy, PLAYER_RADIUS, this.H - PLAYER_RADIUS);
+    const radius = me.radius || PLAYER_RADIUS;
+    me.x = clamp(me.x + dx, radius, this.W - radius);
+    me.y = clamp(me.y + dy, radius, this.H - radius);
     // Push out of walls
     this._resolveWalls(me);
 
@@ -402,11 +442,13 @@ export class ArenaGame {
     const bulletSpeed = data.bulletSpeed || BULLET_SPEED;
     const bulletLife = data.life || 120;
     const bulletDamage = data.damage || 25;
+    const shooter = this.players.get(fromId);
+    const shooterRadius = shooter?.radius || PLAYER_RADIUS;
     for (let i = 0; i < count; i++) {
       const spreadAngle = data.angle + (i - (count - 1) / 2) * spread;
       this.bullets.push({
-        x: data.x + Math.cos(data.angle) * (PLAYER_RADIUS + 4),
-        y: data.y + Math.sin(data.angle) * (PLAYER_RADIUS + 4),
+        x: data.x + Math.cos(data.angle) * (shooterRadius + 4),
+        y: data.y + Math.sin(data.angle) * (shooterRadius + 4),
         vx: Math.cos(spreadAngle) * bulletSpeed,
         vy: Math.sin(spreadAngle) * bulletSpeed,
         from: fromId,
@@ -420,23 +462,34 @@ export class ArenaGame {
   }
 
   _moveSpeedFor(player) {
-    const hpRatio = clamp((player.hp || BASE_HP) / BASE_HP, 0.3, 1);
+    const maxHp = player.maxHp || BASE_HP;
+    const hpRatio = clamp((player.hp || maxHp) / maxHp, 0.3, 1);
     const base = BASE_SPEED + (BOOST_SPEED - BASE_SPEED) * (1 - hpRatio);
-    return player.weapon === 'rapid' ? base + 0.5 : base;
+    const weaponBonus = player.weapon === 'rapid' ? 0.5 : 0;
+    const hasteMultiplier = (player.hasteUntil || 0) > Date.now() ? HASTE_SPEED_MULTIPLIER : 1;
+    return (base + weaponBonus) * (player.speedMultiplier || 1) * hasteMultiplier;
   }
 
   _weaponConfigFor(player) {
     const now = Date.now();
-    if (player.weapon !== 'blaster' && player.weaponUntil && now > player.weaponUntil) {
-      player.weapon = 'blaster';
+    const baseWeapon = player.baseWeapon || 'blaster';
+    if (player.weapon !== baseWeapon && player.weaponUntil && now > player.weaponUntil) {
+      player.weapon = baseWeapon;
       player.weaponUntil = 0;
     }
-    return WEAPONS[player.weapon] || WEAPONS.blaster;
+    const weapon = WEAPONS[player.weapon] || WEAPONS[baseWeapon] || WEAPONS.blaster;
+    const overchargeMultiplier = (player.overchargeUntil || 0) > now ? OVERCHARGE_DAMAGE_MULTIPLIER : 1;
+    return {
+      ...weapon,
+      damage: weapon.damage * (player.damageMultiplier || 1) * overchargeMultiplier,
+      cooldown: weapon.cooldown * (player.cooldownMultiplier || 1),
+    };
   }
 
   _resolveWalls(player) {
+    const radius = player.radius || PLAYER_RADIUS;
     for (const w of this.walls) {
-      if (lineCircleIntersect(w.x1, w.y1, w.x2, w.y2, player.x, player.y, PLAYER_RADIUS)) {
+      if (lineCircleIntersect(w.x1, w.y1, w.x2, w.y2, player.x, player.y, radius)) {
         // Push player out: find closest point on segment
         const dx = w.x2 - w.x1;
         const dy = w.y2 - w.y1;
@@ -448,8 +501,8 @@ export class ArenaGame {
         const px = player.x - cx;
         const py = player.y - cy;
         const d = Math.sqrt(px * px + py * py);
-        if (d < PLAYER_RADIUS && d > 0.01) {
-          const push = PLAYER_RADIUS - d + 1;
+        if (d < radius && d > 0.01) {
+          const push = radius - d + 1;
           player.x += (px / d) * push;
           player.y += (py / d) * push;
         }
@@ -465,8 +518,9 @@ export class ArenaGame {
     const player = this.players.get(input.from);
     if (!player || player.eliminated) return;
 
-    const targetX = clamp(Number.isFinite(input.x) ? input.x : player.x, PLAYER_RADIUS, this.W - PLAYER_RADIUS);
-    const targetY = clamp(Number.isFinite(input.y) ? input.y : player.y, PLAYER_RADIUS, this.H - PLAYER_RADIUS);
+    const radius = player.radius || PLAYER_RADIUS;
+    const targetX = clamp(Number.isFinite(input.x) ? input.x : player.x, radius, this.W - radius);
+    const targetY = clamp(Number.isFinite(input.y) ? input.y : player.y, radius, this.H - radius);
     const dx = targetX - player.x;
     const dy = targetY - player.y;
     const distance = Math.sqrt(dx * dx + dy * dy);
@@ -543,10 +597,28 @@ export class ArenaGame {
         x: Math.round(p.x * 10) / 10,
         y: Math.round(p.y * 10) / 10,
         angle: Math.round(p.angle * 100) / 100,
+        username: p.username,
+        color: p.color,
         hp: p.hp,
+        maxHp: p.maxHp,
         armor: p.armor,
+        maxArmor: p.maxArmor,
+        character: p.character,
+        characterLabel: p.characterLabel,
+        characterGlyph: p.characterGlyph,
+        radius: p.radius,
+        baseWeapon: p.baseWeapon,
         weapon: p.weapon,
         weaponUntil: p.weaponUntil || 0,
+        speedMultiplier: p.speedMultiplier,
+        damageMultiplier: p.damageMultiplier,
+        cooldownMultiplier: p.cooldownMultiplier,
+        pickupRadiusMultiplier: p.pickupRadiusMultiplier,
+        itemDurationMultiplier: p.itemDurationMultiplier,
+        hasteUntil: p.hasteUntil || 0,
+        overchargeUntil: p.overchargeUntil || 0,
+        magnetUntil: p.magnetUntil || 0,
+        regenUntil: p.regenUntil || 0,
         eliminated: p.eliminated,
       };
     }
@@ -593,7 +665,12 @@ export class ArenaGame {
       if (!player) {
         player = {
           x: ps.x, y: ps.y, angle: ps.angle, color: '#4fc3f7', username: '?',
-          hp: BASE_HP, armor: 0, weapon: 'blaster', weaponUntil: 0, lastShootTime: 0, eliminated: false
+          hp: ps.maxHp || BASE_HP, maxHp: ps.maxHp || BASE_HP,
+          armor: 0, maxArmor: ps.maxArmor || 100,
+          character: ps.character || 'vanguard', characterLabel: ps.characterLabel || 'Vanguard',
+          characterGlyph: ps.characterGlyph || 'V', radius: ps.radius || PLAYER_RADIUS,
+          baseWeapon: ps.baseWeapon || 'blaster', weapon: ps.weapon || 'blaster',
+          weaponUntil: 0, lastShootTime: 0, eliminated: false
         };
         this.players.set(id, player);
       }
@@ -602,10 +679,28 @@ export class ArenaGame {
       player.x = ps.x;
       player.y = ps.y;
       player.angle = ps.angle;
+      player.username = ps.username || player.username || '?';
+      player.color = ps.color || player.color || '#4fc3f7';
       player.hp = ps.hp ?? BASE_HP;
+      player.maxHp = ps.maxHp || BASE_HP;
       player.armor = ps.armor ?? 0;
+      player.maxArmor = ps.maxArmor || 100;
+      player.character = ps.character || 'vanguard';
+      player.characterLabel = ps.characterLabel || 'Vanguard';
+      player.characterGlyph = ps.characterGlyph || 'V';
+      player.radius = ps.radius || PLAYER_RADIUS;
+      player.baseWeapon = ps.baseWeapon || 'blaster';
       player.weapon = ps.weapon || 'blaster';
       player.weaponUntil = ps.weaponUntil || 0;
+      player.speedMultiplier = ps.speedMultiplier || 1;
+      player.damageMultiplier = ps.damageMultiplier || 1;
+      player.cooldownMultiplier = ps.cooldownMultiplier || 1;
+      player.pickupRadiusMultiplier = ps.pickupRadiusMultiplier || 1;
+      player.itemDurationMultiplier = ps.itemDurationMultiplier || 1;
+      player.hasteUntil = ps.hasteUntil || 0;
+      player.overchargeUntil = ps.overchargeUntil || 0;
+      player.magnetUntil = ps.magnetUntil || 0;
+      player.regenUntil = ps.regenUntil || 0;
       player.eliminated = ps.eliminated;
     }
 
@@ -655,8 +750,9 @@ export class ArenaGame {
         const speed = this._moveSpeedFor(me);
         const len = Math.sqrt(dx * dx + dy * dy);
         const norm = len > 1 ? len : 1;
-        me.x = clamp(me.x + (dx / norm) * speed, PLAYER_RADIUS, this.W - PLAYER_RADIUS);
-        me.y = clamp(me.y + (dy / norm) * speed, PLAYER_RADIUS, this.H - PLAYER_RADIUS);
+        const radius = me.radius || PLAYER_RADIUS;
+        me.x = clamp(me.x + (dx / norm) * speed, radius, this.W - radius);
+        me.y = clamp(me.y + (dy / norm) * speed, radius, this.H - radius);
         this._resolveWalls(me);
       }
       me.angle = Math.atan2(this.mouseY - me.y, this.mouseX - me.x);
@@ -767,7 +863,7 @@ export class ArenaGame {
       z.x += (dx / d) * speed;
       z.y += (dy / d) * speed;
 
-      if (d < z.r + PLAYER_RADIUS + 2 && now - (z.lastBiteAt || 0) > 500) {
+      if (d < z.r + (target.radius || PLAYER_RADIUS) + 2 && now - (z.lastBiteAt || 0) > 500) {
         z.lastBiteAt = now;
         target.hp -= 8;
         if (target.hp <= 0) {
@@ -817,7 +913,7 @@ export class ArenaGame {
   }
 
   _dropWaveRewards() {
-    const rewardTypes = ['heal', 'armor', 'rapid', 'spread', 'sniper'];
+    const rewardTypes = ['heal', 'medkit', 'armor', 'shield', 'haste', 'overcharge', 'magnet', 'regen', 'rapid', 'spread', 'sniper'];
     const dropCount = Math.min(5, 2 + Math.floor(this._zombieWave / 2));
     const my = this.players.get(this.network.myId);
     const cx = my ? my.x : this.W / 2;
@@ -858,7 +954,15 @@ export class ArenaGame {
     }
     const alivePlayers = [];
     for (const [id, p] of this.players) {
-      if (!p.eliminated) alivePlayers.push({ id, username: p.username, color: p.color });
+      if (!p.eliminated) {
+        alivePlayers.push({
+          id,
+          username: p.username,
+          color: p.color,
+          character: p.character,
+          characterLabel: p.characterLabel,
+        });
+      }
     }
 
     if (alivePlayers.length <= 1) {
@@ -870,7 +974,10 @@ export class ArenaGame {
           username: p.username,
           color: p.color,
           hp: p.hp,
+          maxHp: p.maxHp,
           armor: p.armor,
+          maxArmor: p.maxArmor,
+          character: p.character,
           weapon: p.weapon,
           eliminated: p.eliminated,
         })),

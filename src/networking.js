@@ -11,6 +11,7 @@
 
 import Peer from 'peerjs';
 import { HUB_AUTHORITATIVE_TYPES, MSG, createMessage } from './protocol.js';
+import { normalizeCharacterType } from './arena-rules.js';
 
 function createSessionId(prefix) {
   const uuid = globalThis.crypto?.randomUUID?.();
@@ -53,7 +54,7 @@ export class LobbyNetwork {
     this.isHub = false;
     this.lobbyId = getLobbyId();
     this.myId = null;
-    this.myUser = null; // { id, username, color, isHub }
+    this.myUser = null; // { id, username, color, arenaCharacter, isHub }
     this.users = new Map(); // peerId -> { id, username, color, isHub, conn }
     this.connections = new Map(); // peerId -> DataConnection
     this.chatMessages = [];
@@ -104,8 +105,9 @@ export class LobbyNetwork {
    */
   connect(settings) {
     return new Promise((resolve, reject) => {
-      const username = settings.username || 'Visitor';
-      const color = settings.color || '#4fc3f7';
+      const username = normalizeUsername(settings.username || 'Visitor');
+      const color = normalizeColor(settings.color);
+      const arenaCharacter = normalizeCharacterType(settings.arenaCharacter);
 
       // Try to become hub first
       const hubPeer = new Peer(this.lobbyId, {
@@ -134,6 +136,7 @@ export class LobbyNetwork {
           id,
           username: hubName,
           color,
+          arenaCharacter,
           isHub: true,
           number: 0,
         };
@@ -148,7 +151,7 @@ export class LobbyNetwork {
         if (err.type === 'unavailable-id' && !resolved) {
           resolved = true;
           hubPeer.destroy();
-          this._connectAsVisitor(username, color).then(resolve).catch(reject);
+          this._connectAsVisitor(username, color, arenaCharacter).then(resolve).catch(reject);
         } else if (!resolved) {
           this._emit('error', err);
           reject(err);
@@ -160,7 +163,7 @@ export class LobbyNetwork {
         if (!resolved) {
           resolved = true;
           hubPeer.destroy();
-          this._connectAsVisitor(username, color).then(resolve).catch(reject);
+          this._connectAsVisitor(username, color, arenaCharacter).then(resolve).catch(reject);
         }
       }, 5000);
 
@@ -171,7 +174,7 @@ export class LobbyNetwork {
     });
   }
 
-  _connectAsVisitor(username, color) {
+  _connectAsVisitor(username, color, arenaCharacter) {
     return new Promise((resolve, reject) => {
       const visitorPeer = new Peer(undefined, {
         debug: 0,
@@ -199,6 +202,7 @@ export class LobbyNetwork {
             id,
             username,
             color,
+            arenaCharacter,
             isHub: false,
           }));
 
@@ -206,6 +210,7 @@ export class LobbyNetwork {
             id,
             username,
             color,
+            arenaCharacter,
             isHub: false,
             number: -1, // will be assigned by hub
           };
@@ -308,6 +313,7 @@ export class LobbyNetwork {
           id: peerId,
           username: assignedName,
           color: normalizeColor(msg.payload.color),
+          arenaCharacter: normalizeCharacterType(msg.payload.arenaCharacter),
           isHub: false,
           number: this._visitorCounter,
           conn: fromConn,
@@ -318,6 +324,7 @@ export class LobbyNetwork {
         fromConn.send(createMessage(MSG.USER_LIST, {
           yourNumber: this._visitorCounter,
           yourAssignedName: user.username,
+          yourArenaCharacter: user.arenaCharacter,
           users: this.getUserList(),
           chatHistory: this.chatMessages.slice(-50),
         }));
@@ -431,6 +438,7 @@ export class LobbyNetwork {
         if (u) {
           u.username = normalizeUsername(msg.payload.username, u.username);
           u.color = normalizeColor(msg.payload.color, u.color);
+          u.arenaCharacter = normalizeCharacterType(msg.payload.arenaCharacter);
           this.users.set(fromConn.peer, u);
           this._broadcastFromHub(createMessage(MSG.USER_LIST, {
             users: this.getUserList(),
@@ -462,6 +470,9 @@ export class LobbyNetwork {
       case MSG.USER_LIST: {
         if (msg.payload.yourNumber !== undefined) {
           this.myUser.number = msg.payload.yourNumber;
+          this.myUser.arenaCharacter = normalizeCharacterType(
+            msg.payload.yourArenaCharacter || this.myUser.arenaCharacter,
+          );
           if (!this.myUser.username || this.myUser.username.startsWith('slide-visitor')) {
             this.myUser.username = msg.payload.yourAssignedName || `slide-visitor#${msg.payload.yourNumber}`;
           }
@@ -850,17 +861,22 @@ export class LobbyNetwork {
   }
 
   /**
-   * Public: Update username/color
+   * Public: Update username/color/Arena character
    */
-  updateProfile(username, color) {
-    this.myUser.username = username;
-    this.myUser.color = color;
+  updateProfile(username, color, arenaCharacter = this.myUser.arenaCharacter) {
+    const normalizedUsername = normalizeUsername(username, this.myUser.username);
+    const normalizedColor = normalizeColor(color, this.myUser.color);
+    const normalizedCharacter = normalizeCharacterType(arenaCharacter);
+    this.myUser.username = normalizedUsername;
+    this.myUser.color = normalizedColor;
+    this.myUser.arenaCharacter = normalizedCharacter;
 
     if (this.isHub) {
       const u = this.users.get(this.myId);
       if (u) {
-        u.username = username;
-        u.color = color;
+        u.username = normalizedUsername;
+        u.color = normalizedColor;
+        u.arenaCharacter = normalizedCharacter;
       }
       this._broadcastFromHub(createMessage(MSG.USER_LIST, {
         users: this.getUserList(),
@@ -869,8 +885,9 @@ export class LobbyNetwork {
     } else {
       this._sendToPeer(this.lobbyId, createMessage(MSG.USERNAME_UPDATE, {
         id: this.myId,
-        username,
-        color,
+        username: normalizedUsername,
+        color: normalizedColor,
+        arenaCharacter: normalizedCharacter,
       }));
     }
   }
@@ -1052,6 +1069,7 @@ export class LobbyNetwork {
         id: user.id,
         username: user.username,
         color: user.color,
+        arenaCharacter: normalizeCharacterType(user.arenaCharacter),
         isHub: user.isHub,
         number: user.number,
       });
@@ -1061,6 +1079,7 @@ export class LobbyNetwork {
         id: this.myUser.id,
         username: this.myUser.username,
         color: this.myUser.color,
+        arenaCharacter: normalizeCharacterType(this.myUser.arenaCharacter),
         isHub: this.myUser.isHub,
         number: this.myUser.number,
       });

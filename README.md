@@ -26,10 +26,11 @@ The first visitor becomes the **Hub** with special powers:
 
 ### 🕹️ Mini-Games
 - **Pong** — Challenge any user to a classic 1v1 Pong match
-- **Arena** — Top-down shooter where all lobby members compete
+- **Arena** — Hub-authoritative top-down shooter with selectable character archetypes, item drops, and solo zombie survival
 
 ### ⚙️ Settings
 - Customize your **username** and **color**
+- Select an **Arena character** with a distinct loadout and stat profile
 - **Dark mode** — Force dark styling on presentations
 - **High contrast** — Enhanced accessibility
 - **Offline mode** — Temporarily disconnect from the lobby
@@ -159,12 +160,28 @@ Reveal.initialize({
 
 ### Arena Game
 
-1. Hub clicks **"Launch Arena"**
-2. All players join a shared 2D map
-3. **H/J/K/L** to move, **Mouse** to aim, **Space** to fire
-4. Hit once → half-filled circle, faster movement
-5. Hit twice → eliminated
-6. Last player standing wins!
+1. Choose an Arena character in **Settings**.
+2. The Hub clicks **"Launch Arena"** and every lobby member joins the same authoritative round.
+3. Use **W/A/S/D** or **H/J/K/L** to move, the **mouse** to aim, and **click/Space** to fire.
+4. Collect weighted item drops for healing, armor, temporary effects, and weapon changes.
+5. The last player standing wins; a one-player lobby automatically enters escalating zombie survival mode.
+
+Character archetypes:
+
+- **Vanguard** — balanced health, armor, movement, and blaster handling.
+- **Scout** — compact and fast, starts with rapid fire, but has lower durability.
+- **Guardian** — larger and slower, with 135 HP, 150 armor capacity, and starting armor.
+- **Ranger** — precise long-range specialist that starts with the sniper weapon.
+- **Engineer** — wider pickup reach, longer item effects, starting armor, and efficient firing.
+
+Item families:
+
+- **Recovery:** HEAL and MED+.
+- **Defense:** ARMOR and SHIELD.
+- **Timed effects:** HASTE, AMP, MAGNET, and REGEN.
+- **Weapons:** RAPID, SPREAD, and SNIPER.
+
+The Hub owns character validation, movement limits, weapon statistics, item pickups, timed effects, collisions, and result calculation. Visitors only submit bounded input commands and reconcile from Hub snapshots.
 
 ## 🔧 Development
 
@@ -187,6 +204,9 @@ pnpm dev
 
 # Dev server - watch + serve example at localhost:8080
 pnpm dev-server
+
+# Deterministic fixed-build server used by Playwright
+pnpm test-server
 
 # Preview - build once and serve example
 pnpm preview
@@ -216,7 +236,10 @@ reveal-peerjs-plugin/
 │   ├── settings-modal.js  # Settings dialog
 │   ├── hub-menu.js        # Hub controls menu
 │   ├── pong.js            # Pong mini-game
-│   └── arena-game.js      # Arena shooter game
+│   ├── arena-game.js      # Arena lifecycle and Hub-authoritative simulation
+│   ├── arena-rules.js     # Character, weapon, item, and balance configuration
+│   ├── arena-sim.js       # Pure simulation and pickup primitives
+│   └── arena-render.js    # Canvas, HUD, scoreboard, and item rendering
 ├── example/
 │   └── index.html         # Demo presentation
 ├── dist/                  # Built output (generated)

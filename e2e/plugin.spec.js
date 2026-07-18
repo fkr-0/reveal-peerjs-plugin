@@ -173,11 +173,7 @@ test.describe('Settings Modal', () => {
     const modal = page.locator('.rpjs-modal');
     await expect(modal).toBeVisible();
 
-    // Find username input
-    const usernameInput = modal.locator('input[placeholder*="username" i]').or(
-      modal.locator('.rpjs-field-input').first()
-    );
-
+    const usernameInput = modal.locator('#rpjs-settings-username');
     await usernameInput.fill('E2E Test User');
 
     // Save settings
@@ -212,6 +208,18 @@ test.describe('Settings Modal', () => {
 
     // Body should have dark mode class
     await expect(page.locator('body')).toHaveClass(/rpjs-dark-mode/);
+  });
+
+  test('should persist the selected Arena character', async ({ page }) => {
+    await page.locator('#rpjs-btn-settings').click();
+
+    const characterSelect = page.locator('#rpjs-settings-arena-character');
+    await characterSelect.selectOption('engineer');
+    await expect(page.locator('#rpjs-settings-arena-preview')).toContainText(/extended item effects/i);
+    await page.locator('#rpjs-settings-save').click();
+
+    await page.locator('#rpjs-btn-settings').click();
+    await expect(page.locator('#rpjs-settings-arena-character')).toHaveValue('engineer');
   });
 });
 

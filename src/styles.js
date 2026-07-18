@@ -229,6 +229,20 @@ export function injectStyles() {
       font-weight: 500;
     }
 
+    .rpjs-user-character-tag {
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.68);
+      font-size: 9px;
+      font-weight: 800;
+    }
+
     /* Chat area */
     .rpjs-chat-section {
       flex: 1;
@@ -500,6 +514,11 @@ export function injectStyles() {
 
     .rpjs-field-input:focus {
       border-color: rgba(79, 195, 247, 0.5);
+    }
+
+    .rpjs-field-input option {
+      background: #202028;
+      color: #e0e0e0;
     }
 
     .rpjs-color-row {
@@ -1335,6 +1354,55 @@ export function injectStyles() {
       font-variant-numeric: tabular-nums;
     }
 
+    .rpjs-arena-item-legend {
+      position: absolute;
+      left: 16px;
+      bottom: 16px;
+      width: min(360px, calc(100vw - 32px));
+      color: rgba(255, 255, 255, 0.76);
+      background: rgba(4, 8, 14, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 8px;
+      padding: 6px 9px;
+      font-size: 10px;
+      cursor: default;
+      z-index: 10002;
+    }
+
+    .rpjs-arena-item-legend summary {
+      cursor: pointer;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+    }
+
+    .rpjs-arena-item-legend-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 5px 8px;
+      padding-top: 7px;
+    }
+
+    .rpjs-arena-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+
+    .rpjs-arena-legend-glyph {
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 8px;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.2);
+    }
+
     /* Arena touch controls (mobile) */
     .rpjs-arena-touch-controls {
       display: none;
@@ -1346,6 +1414,13 @@ export function injectStyles() {
       }
       .rpjs-arena-controls {
         display: none;
+      }
+      .rpjs-arena-item-legend {
+        bottom: 174px;
+        max-width: 260px;
+      }
+      .rpjs-arena-item-legend-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
       }
     }
 

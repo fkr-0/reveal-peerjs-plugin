@@ -4,6 +4,7 @@
 
 import { USER_ICON, CLOSE_ICON } from './icons.js';
 import { loadSettings, saveSettings } from './settings.js';
+import { CHARACTER_TYPES, getCharacterConfig, normalizeCharacterType } from './arena-rules.js';
 
 export class SettingsModal {
   constructor(network, settings, onSettingsChange) {
@@ -20,6 +21,14 @@ export class SettingsModal {
     const overlay = document.createElement('div');
     overlay.className = 'rpjs-modal-overlay';
 
+    const selectedCharacter = normalizeCharacterType(this.settings.arenaCharacter);
+    const characterOptions = Object.values(CHARACTER_TYPES).map(character => `
+      <option value="${character.id}" ${character.id === selectedCharacter ? 'selected' : ''}>
+        ${character.label}
+      </option>
+    `).join('');
+    const character = getCharacterConfig(selectedCharacter);
+
     overlay.innerHTML = `
       <div class="rpjs-modal">
         <div class="rpjs-modal-title">
@@ -28,9 +37,19 @@ export class SettingsModal {
         </div>
 
         <div class="rpjs-field">
+          <label class="rpjs-field-label" for="rpjs-settings-arena-character">Arena Character</label>
+          <select class="rpjs-field-input" id="rpjs-settings-arena-character">
+            ${characterOptions}
+          </select>
+          <div id="rpjs-settings-arena-preview" style="margin-top:8px;padding:9px 10px;border-radius:8px;background:rgba(255,255,255,0.05);font-size:12px;line-height:1.45;color:rgba(255,255,255,0.72)">
+            ${this._renderCharacterPreview(character)}
+          </div>
+        </div>
+
+        <div class="rpjs-field">
           <label class="rpjs-field-label">Username</label>
           <input type="text" class="rpjs-field-input" id="rpjs-settings-username"
-                 value="${this._escapeAttr(this.settings.username)}" maxlength="24">
+                 value="${this._escapeAttr(this.settings.username)}" placeholder="Username" maxlength="24">
         </div>
 
         <div class="rpjs-field">
@@ -86,6 +105,12 @@ export class SettingsModal {
     // Close
     this.el.querySelector('#rpjs-settings-close').addEventListener('click', () => {
       this.close();
+    });
+
+    const characterSelect = this.el.querySelector('#rpjs-settings-arena-character');
+    characterSelect.addEventListener('change', () => {
+      const character = getCharacterConfig(characterSelect.value);
+      this.el.querySelector('#rpjs-settings-arena-preview').innerHTML = this._renderCharacterPreview(character);
     });
 
     // Click overlay to close
@@ -148,14 +173,18 @@ export class SettingsModal {
   _save() {
     const username = this.el.querySelector('#rpjs-settings-username').value.trim();
     const color = this.el.querySelector('#rpjs-settings-color-hex').value.trim();
+    const arenaCharacter = normalizeCharacterType(
+      this.el.querySelector('#rpjs-settings-arena-character').value,
+    );
 
     if (username) this.settings.username = username;
     if (/^#[0-9a-fA-F]{6}$/.test(color)) this.settings.color = color;
+    this.settings.arenaCharacter = arenaCharacter;
 
     saveSettings(this.settings);
 
     // Update network profile
-    this.network.updateProfile(this.settings.username, this.settings.color);
+    this.network.updateProfile(this.settings.username, this.settings.color, this.settings.arenaCharacter);
 
     if (this.onSettingsChange) {
       this.onSettingsChange(this.settings);
@@ -165,7 +194,15 @@ export class SettingsModal {
   }
 
   _escapeAttr(str) {
-    return str.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return String(str || '').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  _renderCharacterPreview(character) {
+    const weapon = character.startingWeapon.toUpperCase();
+    const armor = character.startArmor ? ` · starts with ${character.startArmor} armor` : '';
+    return `<strong style="color:#fff">${character.glyph} · ${character.label}</strong><br>
+      ${character.description}<br>
+      HP ${character.maxHp} · armor cap ${character.maxArmor}${armor} · ${weapon}`;
   }
 
   show() {

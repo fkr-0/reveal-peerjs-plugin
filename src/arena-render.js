@@ -93,6 +93,7 @@ function drawPlayers(game) {
   for (const [pid, p] of game.players) {
     const isMe = pid === myId;
     const alpha = p.eliminated ? 0.2 : 1;
+    const radius = p.radius || PLAYER_RADIUS;
     ctx.save();
     ctx.globalAlpha = alpha;
 
@@ -100,7 +101,7 @@ function drawPlayers(game) {
       ctx.strokeStyle = p.color;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, PLAYER_RADIUS, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
       ctx.stroke();
       ctx.beginPath();
       ctx.moveTo(p.x - 6, p.y - 6);
@@ -112,49 +113,103 @@ function drawPlayers(game) {
       continue;
     }
 
-    ctx.fillStyle = p.color;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, PLAYER_RADIUS, 0, Math.PI * 2);
-    ctx.fill();
+    drawCharacterBody(ctx, p, radius);
 
     ctx.strokeStyle = 'rgba(255,255,255,0.4)';
     ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, PLAYER_RADIUS, 0, Math.PI * 2);
     ctx.stroke();
+
+    ctx.fillStyle = 'rgba(255,255,255,0.88)';
+    ctx.font = `bold ${Math.max(8, radius * 0.75)}px -apple-system, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(p.characterGlyph || 'V', p.x, p.y + 0.5);
+    ctx.textBaseline = 'alphabetic';
 
     if (isMe) {
       ctx.strokeStyle = p.color;
       ctx.lineWidth = 3;
       ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(p.x + Math.cos(p.angle) * PLAYER_RADIUS, p.y + Math.sin(p.angle) * PLAYER_RADIUS);
-      ctx.lineTo(p.x + Math.cos(p.angle) * (PLAYER_RADIUS + DIRECTION_LINE_LEN), p.y + Math.sin(p.angle) * (PLAYER_RADIUS + DIRECTION_LINE_LEN));
+      ctx.moveTo(p.x + Math.cos(p.angle) * radius, p.y + Math.sin(p.angle) * radius);
+      ctx.lineTo(p.x + Math.cos(p.angle) * (radius + DIRECTION_LINE_LEN), p.y + Math.sin(p.angle) * (radius + DIRECTION_LINE_LEN));
       ctx.stroke();
     }
 
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.font = '10px -apple-system, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(p.username, p.x, p.y + PLAYER_RADIUS + 14);
+    ctx.fillText(p.username, p.x, p.y + radius + 14);
 
-    const hpPct = clamp((p.hp || 0) / BASE_HP, 0, 1);
+    const hpPct = clamp((p.hp || 0) / (p.maxHp || BASE_HP), 0, 1);
     ctx.strokeStyle = hpPct > 0.5 ? '#66bb6a' : hpPct > 0.25 ? '#ffa726' : '#ef5350';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, PLAYER_RADIUS + 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpPct);
+    ctx.arc(p.x, p.y, radius + 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpPct);
     ctx.stroke();
 
     if (p.armor > 0) {
-      const arPct = clamp((p.armor || 0) / MAX_ARMOR, 0, 1);
+      const arPct = clamp((p.armor || 0) / (p.maxArmor || MAX_ARMOR), 0, 1);
       ctx.strokeStyle = 'rgba(66,165,245,0.9)';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, PLAYER_RADIUS + 8, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * arPct);
+      ctx.arc(p.x, p.y, radius + 8, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * arPct);
       ctx.stroke();
     }
+    drawPlayerEffects(ctx, p, radius);
     ctx.restore();
   }
+}
+
+function drawCharacterBody(ctx, player, radius) {
+  ctx.fillStyle = player.color;
+  ctx.beginPath();
+  switch (player.character) {
+    case 'scout':
+      ctx.moveTo(player.x, player.y - radius);
+      ctx.lineTo(player.x + radius, player.y);
+      ctx.lineTo(player.x, player.y + radius);
+      ctx.lineTo(player.x - radius, player.y);
+      ctx.closePath();
+      break;
+    case 'guardian':
+      ctx.rect(player.x - radius * 0.82, player.y - radius * 0.82, radius * 1.64, radius * 1.64);
+      break;
+    case 'ranger':
+      ctx.moveTo(player.x + Math.cos(player.angle) * radius, player.y + Math.sin(player.angle) * radius);
+      ctx.lineTo(player.x + Math.cos(player.angle + 2.35) * radius, player.y + Math.sin(player.angle + 2.35) * radius);
+      ctx.lineTo(player.x + Math.cos(player.angle - 2.35) * radius, player.y + Math.sin(player.angle - 2.35) * radius);
+      ctx.closePath();
+      break;
+    case 'engineer':
+      for (let i = 0; i < 6; i++) {
+        const angle = Math.PI / 3 * i - Math.PI / 6;
+        const x = player.x + Math.cos(angle) * radius;
+        const y = player.y + Math.sin(angle) * radius;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      break;
+    default:
+      ctx.arc(player.x, player.y, radius, 0, Math.PI * 2);
+  }
+  ctx.fill();
+}
+
+function drawPlayerEffects(ctx, player, radius) {
+  const now = Date.now();
+  const effects = [
+    ['hasteUntil', '#26c6da'],
+    ['overchargeUntil', '#ec407a'],
+    ['magnetUntil', '#8d6e63'],
+    ['regenUntil', '#9ccc65'],
+  ].filter(([key]) => (player[key] || 0) > now);
+  effects.forEach(([, color], index) => {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(player.x - (effects.length - 1) * 3 + index * 6, player.y - radius - 13, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  });
 }
 
 function drawZombies(game) {
@@ -213,7 +268,7 @@ function drawItems(game) {
     ctx.fillStyle = 'rgba(255,255,255,0.9)';
     ctx.font = '9px -apple-system, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(meta.label[0], item.x, item.y + 3);
+    ctx.fillText(meta.glyph || meta.label[0], item.x, item.y + 3);
   }
 }
 
@@ -245,9 +300,9 @@ export function updateArenaScoreboard(game) {
     html += `<div class="rpjs-arena-scoreboard-row">
       <span class="rpjs-arena-scoreboard-name">
         <span style="width:6px;height:6px;border-radius:50%;background:${p.color};display:inline-block"></span>
-        <span style="${isMe ? 'font-weight:600' : ''}">${p.username}</span>
+        <span style="${isMe ? 'font-weight:600' : ''}">${escapeHtml(p.username)} <small style="opacity:.58">${escapeHtml(p.characterGlyph || 'V')}</small></span>
       </span>
-      <span class="rpjs-arena-scoreboard-hp ${hpClass}" title="Armor ${Math.round(p.armor || 0)} | Weapon ${p.weapon || 'blaster'}">${status}</span>
+      <span class="rpjs-arena-scoreboard-hp ${hpClass}" title="${escapeHtml(p.characterLabel || 'Vanguard')} | Armor ${Math.round(p.armor || 0)} | Weapon ${escapeHtml(p.weapon || 'blaster')}">${status}</span>
     </div>`;
   }
   if (game.zombieMode) {
@@ -266,6 +321,24 @@ export function updateArenaHud(game) {
   const hp = me ? Math.round(me.hp || 0) : 0;
   const armor = me ? Math.round(me.armor || 0) : 0;
   const weapon = me ? (me.weapon || 'blaster').toUpperCase() : 'BLASTER';
+  const character = me ? (me.characterLabel || 'Vanguard') : 'Vanguard';
+  const now = Date.now();
+  const effects = me ? [
+    (me.hasteUntil || 0) > now ? 'HASTE' : '',
+    (me.overchargeUntil || 0) > now ? 'AMP' : '',
+    (me.magnetUntil || 0) > now ? 'MAG' : '',
+    (me.regenUntil || 0) > now ? 'REGEN' : '',
+  ].filter(Boolean) : [];
+  const effectText = effects.length ? ` · ${effects.join('+')}` : '';
   const mode = game.zombieMode ? ` · W${game._zombieWave || 1} · ZM ${Math.round(game._zombiesPerMin)}/min` : '';
-  hudCount.textContent = `Alive ${alive}/${game.players.size} · HP ${hp} · AR ${armor} · ${weapon}${mode}`;
+  hudCount.textContent = `Alive ${alive}/${game.players.size} · ${character} · HP ${hp} · AR ${armor} · ${weapon}${effectText}${mode}`;
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }

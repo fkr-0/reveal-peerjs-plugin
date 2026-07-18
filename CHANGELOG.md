@@ -5,6 +5,38 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-07-18
+
+### Added
+
+- Five selectable Arena character archetypes: balanced Vanguard, rapid Scout, armored Guardian, precise Ranger, and item-specialist Engineer.
+- Per-character starting loadouts, health and armor caps, body sizes, movement, damage, fire-rate, pickup-range, and item-duration traits.
+- Six new Arena pickups: MED+, SHIELD, HASTE, AMP, MAGNET, and REGEN, alongside the existing healing, armor, and weapon drops.
+- Weighted item spawning, larger concurrent item pools, class-aware pickup ranges, and expanded zombie-wave rewards.
+- Distinct character silhouettes, class glyphs in the lobby and Arena, active-effect indicators, and an expandable in-game item legend.
+- End-to-end tests for character normalization, class stat construction, timed effects, regeneration, item weighting, profile persistence, and Hub-side class validation.
+
+### Changed
+
+- Arena player construction is now driven by a centralized, extensible character configuration instead of fixed player constants.
+- The Hub synchronizes complete character, loadout, health-cap, armor-cap, collision-radius, and timed-effect state to every visitor.
+- Movement bounds, wall resolution, projectile origins, hit detection, zombie bites, health rings, and armor rings now respect each character's dimensions and caps.
+- Arena HUD and scoreboard now expose character roles, weapons, and active timed effects.
+- User profiles now include a persisted Arena character selection and propagate it through the Hub-owned user list.
+
+### Fixed
+
+- Escaped usernames consistently in lobby lists, message-target controls, chat history, and Arena scoreboards.
+- Normalized locally stored usernames, colors, and Arena character values before they enter the PeerJS network path.
+- Closed a prototype-property edge case in Arena character validation.
+- Isolated Playwright from live watch rebuilds so long e2e runs always serve one immutable production bundle.
+- Blocked static development-server paths that resolve outside the project root.
+
+### Security
+
+- Arena archetype identifiers are allow-listed by the Hub; unknown or forged class names fall back to Vanguard.
+- Character-derived combat values remain Hub-owned and cannot be supplied through movement or shooting commands.
+
 ## [1.1.0] - 2026-07-18
 
 ### Added

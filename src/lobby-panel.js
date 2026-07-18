@@ -3,6 +3,7 @@
  */
 
 import { CHAT_ICON, CLOSE_ICON, SEND_ICON, CHEVRON_DOWN, LOBBY_ICON, PONG_ICON } from './icons.js';
+import { getCharacterConfig } from './arena-rules.js';
 
 export class LobbyPanel {
   constructor(network, settings) {
@@ -266,7 +267,7 @@ export class LobbyPanel {
       html += `
         <div class="rpjs-target-dropdown-item" role="option" data-target="${u.id}">
           <span class="rpjs-user-dot" style="background:${u.color}"></span>
-          <span>${u.username}${u.isHub ? ' [Hub]' : ''}</span>
+          <span>${this._escapeHtml(u.username)}${u.isHub ? ' [Hub]' : ''}</span>
         </div>
       `;
     }
@@ -288,7 +289,7 @@ export class LobbyPanel {
     const btn = this.el?.querySelector('#rpjs-target-btn');
     if (btn) {
       btn.className = `rpjs-target-btn ${peerId ? 'rpjs-private-active' : ''}`;
-      btn.innerHTML = `${peerId ? this._getTargetName() : 'Lobby'} ${CHEVRON_DOWN}`;
+      btn.innerHTML = `${peerId ? this._escapeHtml(this._getTargetName()) : 'Lobby'} ${CHEVRON_DOWN}`;
     }
   }
 
@@ -299,14 +300,18 @@ export class LobbyPanel {
     const users = this.network.getUserList();
     const myId = this.network.myId;
 
-    listEl.innerHTML = users.map(u => `
+    listEl.innerHTML = users.map(u => {
+      const character = getCharacterConfig(u.arenaCharacter);
+      return `
       <div class="rpjs-user-item" data-peer-id="${u.id}" title="Left-click to set as private message target. Right-click for more options.">
         <span class="rpjs-user-dot" style="background:${u.color}"></span>
-        <span class="rpjs-user-name" style="color:${u.color}">${u.username}</span>
+        <span class="rpjs-user-name" style="color:${u.color}">${this._escapeHtml(u.username)}</span>
+        <span class="rpjs-user-character-tag" title="Arena character: ${character.label}">${character.glyph}</span>
         ${u.isHub ? '<span class="rpjs-user-hub-tag">HUB</span>' : ''}
         ${u.id === myId ? '<span class="rpjs-user-self-tag">YOU</span>' : ''}
       </div>
-    `).join('');
+    `;
+    }).join('');
 
     // Left click on user → set as private message target
     listEl.querySelectorAll('.rpjs-user-item').forEach(item => {
@@ -408,12 +413,12 @@ export class LobbyPanel {
       if (m.private) {
         return `<div class="rpjs-chat-msg rpjs-chat-msg-private">
           <span class="rpjs-chat-private-label">[PM]</span>
-          <span class="rpjs-chat-username" style="color:${m.color || '#ce93d8'}">${m.username}</span>
+          <span class="rpjs-chat-username" style="color:${m.color || '#ce93d8'}">${this._escapeHtml(m.username)}</span>
           <span class="rpjs-chat-text">${this._escapeHtml(m.text)}</span>
         </div>`;
       }
       return `<div class="rpjs-chat-msg">
-        <span class="rpjs-chat-username" style="color:${m.color || '#4fc3f7'}">${m.username}</span>
+        <span class="rpjs-chat-username" style="color:${m.color || '#4fc3f7'}">${this._escapeHtml(m.username)}</span>
         <span class="rpjs-chat-text">${this._escapeHtml(m.text)}</span>
       </div>`;
     }).join('');
