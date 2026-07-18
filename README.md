@@ -21,7 +21,7 @@ Documentation + showcase page: `https://reveal-peerjs.fkr.dev/`
 The first visitor becomes the **Hub** with special powers:
 - **Jump All** — Instantly navigate all viewers to your current slide
 - **Follow Mode** — Continuously sync your slide position to all viewers
-- **Live Polls** — Create timed polls with configurable answers (10s countdown)
+- **Live Polls** — Create timed single- or multiple-choice polls with configurable duration and result sharing
 - **Arena Launch** — Start a multiplayer game for all lobby members
 
 ### 🕹️ Mini-Games
@@ -128,8 +128,16 @@ Reveal.initialize({
 1. **Lobby ID** is derived from the page URL
 2. First visitor becomes the **Hub** and creates a PeerJS peer
 3. Subsequent visitors **connect to the Hub**
-4. Hub **relays messages** between all participants
-5. **Direct peer connections** for low-latency features (Pong)
+4. Hub **routes and validates messages** between all participants
+5. Visitors accept authoritative poll and game state **only from the Hub connection**
+
+### Hub-authoritative state model
+
+- Every authoritative poll, Pong, and Arena message carries a protocol version plus a Hub identity, Hub epoch, and monotonic sequence number.
+- Polls, Pong matches, and Arena rounds have explicit session IDs; stale messages from an older session are ignored.
+- Peer identity is derived from the PeerJS connection. Client-supplied sender IDs, usernames, colors, and Arena ownership fields are never trusted by the Hub.
+- Arena runs as a Hub-authoritative simulation. Visitors send bounded movement and shoot commands, then reconcile all local state from Hub snapshots.
+- Pong uses the challenger as the match simulation authority, but every invite, response, input, snapshot, and terminal event is validated and routed through the Hub.
 
 ## 🎯 Features Deep Dive
 
@@ -137,7 +145,7 @@ Reveal.initialize({
 
 1. Hub clicks the orange **Hub icon** → "Launch Poll"
 2. Enter question and 2-8 answer options
-3. All viewers see a vote modal with a **10-second countdown**
+3. All viewers see a vote modal with the configured countdown and choice mode
 4. Results display with animated bar charts
 
 ### Pong
@@ -172,25 +180,25 @@ pnpm install
 
 ```bash
 # Build the plugin for production
-npm run build
+pnpm build
 
 # Watch mode - rebuild on file changes
-npm run dev
+pnpm dev
 
 # Dev server - watch + serve example at localhost:8080
-npm run dev-server
+pnpm dev-server
 
 # Preview - build once and serve example
-npm run preview
+pnpm preview
 
 # Run e2e tests
-npm run test:e2e
+pnpm test:e2e
 
 # Run e2e tests in UI mode
-npm run test:e2e:ui
+pnpm test:e2e:ui
 
 # Run e2e tests in headed mode
-npm run test:e2e:headed
+pnpm test:e2e:headed
 ```
 
 ### Project Structure
@@ -226,16 +234,16 @@ The project includes comprehensive end-to-end tests using [Playwright](https://p
 
 ```bash
 # Install test dependencies
-npm install
+pnpm install
 
 # Run all tests
-npm run test:e2e
+pnpm test:e2e
 
 # Run tests in interactive UI mode
-npm run test:e2e:ui
+pnpm test:e2e:ui
 
 # Run tests in headed mode (show browser windows)
-npm run test:e2e:headed
+pnpm test:e2e:headed
 ```
 
 ### Test Coverage
@@ -245,6 +253,8 @@ npm run test:e2e:headed
 - **Settings Modal** - Username, color, toggles
 - **Multiplayer** - Hub/visitor roles, multi-user lobby, chat propagation
 - **Hub Controls** - Menu navigation, poll launching
+- **Hub Authority** - Connection-bound identity, epoch/sequence ordering, stale-state rejection, and session isolation
+- **Games** - Pong relay lifecycle, Arena reconciliation, bounded commands, disconnect/leave cleanup, and swept collision detection
 - **Responsive Design** - Mobile, tablet, desktop viewports
 - **Keyboard Navigation** - Tab focus, Escape to close
 
@@ -253,7 +263,7 @@ npm run test:e2e:headed
 The plugin is built using [Vite](https://vitejs.dev/):
 
 - **UMD format** (`dist/reveal-peerjs.js`) — For script tags
-- **ES module format** (`dist/reveal-peerjs.es`) — For bundlers
+- **ES module format** (`dist/reveal-peerjs.es.js`) — For bundlers
 - Source maps included
 
 ## 🌐 Browser Support

@@ -37,7 +37,7 @@ export default defineConfig(({ mode }) => {
         entry: resolve(__dirname, 'src/index.js'),
         name: 'RevealPeerJS',
         formats: ['umd', 'es'],
-        fileName: (format) => `reveal-peerjs.${format === 'es' ? 'es' : 'js'}`,
+        fileName: (format) => `reveal-peerjs.${format === 'es' ? 'es.js' : 'js'}`,
       },
       rollupOptions: {
         external: [],

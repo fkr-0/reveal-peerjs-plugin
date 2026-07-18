@@ -34,6 +34,7 @@ export const MSG = {
 
   // Arena (top-down shooter)
   ARENA_START: 'arena-start',
+  ARENA_LEAVE: 'arena-leave',
   ARENA_STATE: 'arena-state',
   ARENA_INPUT: 'arena-input',
   ARENA_SHOOT: 'arena-shoot',
@@ -41,8 +42,27 @@ export const MSG = {
   ARENA_END: 'arena-end',
 };
 
+export const PROTOCOL_VERSION = 2;
+
+export const HUB_AUTHORITATIVE_TYPES = new Set([
+  MSG.POLL_START,
+  MSG.POLL_RESULTS,
+  MSG.PONG_INVITE,
+  MSG.PONG_ACCEPT,
+  MSG.PONG_DECLINE,
+  MSG.PONG_MOVE,
+  MSG.PONG_STATE,
+  MSG.PONG_SCORE,
+  MSG.PONG_END,
+  MSG.ARENA_START,
+  MSG.ARENA_STATE,
+  MSG.ARENA_HIT,
+  MSG.ARENA_END,
+]);
+
 export function createMessage(type, payload) {
   return {
+    protocolVersion: PROTOCOL_VERSION,
     type,
     payload,
     timestamp: Date.now(),

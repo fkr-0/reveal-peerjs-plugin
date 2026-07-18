@@ -42,6 +42,7 @@ import {
   clamp,
   dist,
   updateBullets,
+  bulletTargetDistance,
   applyBulletCollisions,
   updateItems,
 } from './arena-sim.js';
@@ -133,6 +134,8 @@ export class ArenaGame {
     this._onArenaShoot = null;
     this._onArenaHit = null;
     this._onArenaEnd = null;
+    this._onArenaLeave = null;
+    this._leaveSent = false;
     this._statusText = '';
     this._statusTextUntil = 0;
     this._keyDownHandler = null;
@@ -144,10 +147,18 @@ export class ArenaGame {
     this._spawnPoints = [];
   }
 
+  _handlePeerLeave(payload) {
+    if (!this.isHub || payload?.gameId !== this.gameId) return;
+    if (!this.players.delete(payload.peerId)) return;
+    this.bullets = this.bullets.filter(bullet => bullet.from !== payload.peerId);
+    this._checkGameOver();
+  }
+
   /**
    * Start the game (hub calls this to begin)
    */
   start(gameConfig) {
+    this._leaveSent = false;
     this.gameId = gameConfig.gameId;
     this.seed = gameConfig.seed;
 
@@ -191,6 +202,7 @@ export class ArenaGame {
         weapon: 'blaster',
         weaponUntil: 0,
         lastShootTime: 0,
+        lastInputAt: 0,
         eliminated: false,
       });
     }
@@ -227,12 +239,14 @@ export class ArenaGame {
     this._onArenaShoot = (shoot) => this._handleRemoteShoot(shoot);
     this._onArenaHit = (hit) => this._handleRemoteHit(hit);
     this._onArenaEnd = (results) => this._handleEnd(results);
+    this._onArenaLeave = (payload) => this._handlePeerLeave(payload);
 
     this.network.on('arena-state', this._onArenaState);
     this.network.on('arena-input', this._onArenaInput);
     this.network.on('arena-shoot', this._onArenaShoot);
     this.network.on('arena-hit', this._onArenaHit);
     this.network.on('arena-end', this._onArenaEnd);
+    this.network.on('arena-leave', this._onArenaLeave);
 
     if (this._onStartCb) this._onStartCb();
 
@@ -306,6 +320,7 @@ export class ArenaGame {
     if (this._onArenaShoot) this.network.off('arena-shoot', this._onArenaShoot);
     if (this._onArenaHit) this.network.off('arena-hit', this._onArenaHit);
     if (this._onArenaEnd) this.network.off('arena-end', this._onArenaEnd);
+    if (this._onArenaLeave) this.network.off('arena-leave', this._onArenaLeave);
   }
 
   // ---------- Input ----------
@@ -337,6 +352,7 @@ export class ArenaGame {
 
     // Send to hub
     this.network.sendArenaInput({
+      gameId: this.gameId,
       x: me.x,
       y: me.y,
       angle: me.angle,
@@ -362,6 +378,7 @@ export class ArenaGame {
       : weaponCfg.spread;
 
     const shootData = {
+      gameId: this.gameId,
       x: me.x,
       y: me.y,
       angle: me.angle,
@@ -444,20 +461,70 @@ export class ArenaGame {
 
   _handleRemoteInput(input) {
     if (!this.isHub) return;
+    if (input.gameId && input.gameId !== this.gameId) return;
     const player = this.players.get(input.from);
     if (!player || player.eliminated) return;
-    player.x = clamp(input.x, PLAYER_RADIUS, this.W - PLAYER_RADIUS);
-    player.y = clamp(input.y, PLAYER_RADIUS, this.H - PLAYER_RADIUS);
-    player.angle = input.angle;
+
+    const targetX = clamp(Number.isFinite(input.x) ? input.x : player.x, PLAYER_RADIUS, this.W - PLAYER_RADIUS);
+    const targetY = clamp(Number.isFinite(input.y) ? input.y : player.y, PLAYER_RADIUS, this.H - PLAYER_RADIUS);
+    const dx = targetX - player.x;
+    const dy = targetY - player.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const now = Date.now();
+    const elapsed = player.lastInputAt ? Math.max(0, now - player.lastInputAt) : INPUT_SEND_RATE;
+    player.lastInputAt = now;
+    const maxStep = this._moveSpeedFor(player) * clamp(elapsed / INPUT_SEND_RATE, 1, 5);
+
+    if (distance > maxStep && distance > 0.0001) {
+      player.x += (dx / distance) * maxStep;
+      player.y += (dy / distance) * maxStep;
+    } else {
+      player.x = targetX;
+      player.y = targetY;
+    }
+
+    if (Number.isFinite(input.angle)) player.angle = input.angle;
     this._resolveWalls(player);
   }
 
   _handleRemoteShoot(shoot) {
     if (!this.isHub) return;
-    this._createBullets(shoot.from, shoot);
+    if (shoot.gameId && shoot.gameId !== this.gameId) return;
+    if (shoot.from === this.network.myId) return;
+    const player = this.players.get(shoot.from);
+    if (!player || player.eliminated) return;
+    const weaponCfg = this._weaponConfigFor(player);
+    const now = Date.now();
+    if (now - (player.lastShootTime || 0) < weaponCfg.cooldown) return;
+    player.lastShootTime = now;
+    this._createBullets(shoot.from, this._buildAuthoritativeShootData(player, shoot));
+  }
+
+  _buildAuthoritativeShootData(player, requestedShoot = {}) {
+    const weaponCfg = this._weaponConfigFor(player);
+    const count = weaponCfg.count == null
+      ? clamp(Math.round(Number(requestedShoot.count) || BULLET_COUNT_CLOSE), BULLET_COUNT_FAR, BULLET_COUNT_CLOSE)
+      : weaponCfg.count;
+    const spread = weaponCfg.spread == null
+      ? clamp(Number(requestedShoot.spread ?? SPREAD_CLOSE), SPREAD_FAR, SPREAD_CLOSE)
+      : weaponCfg.spread;
+
+    return {
+      x: player.x,
+      y: player.y,
+      angle: Number.isFinite(requestedShoot.angle) ? requestedShoot.angle : (player.angle || 0),
+      color: player.color,
+      count,
+      spread,
+      damage: weaponCfg.damage,
+      bulletSpeed: weaponCfg.bulletSpeed,
+      life: weaponCfg.life,
+      weapon: player.weapon || 'blaster',
+    };
   }
 
   _handleRemoteHit(hit) {
+    if (hit.gameId && hit.gameId !== this.gameId) return;
     // Apply hit from authoritative state
     const player = this.players.get(hit.targetId);
     if (player) {
@@ -514,6 +581,12 @@ export class ArenaGame {
 
   _handleStateUpdate(state) {
     if (this.isHub) return;
+    if (!state || state.gameId !== this.gameId) return;
+
+    const authoritativeIds = new Set(Object.keys(state.players || {}));
+    for (const id of this.players.keys()) {
+      if (!authoritativeIds.has(id)) this.players.delete(id);
+    }
 
     for (const [id, ps] of Object.entries(state.players || {})) {
       let player = this.players.get(id);
@@ -524,11 +597,11 @@ export class ArenaGame {
         };
         this.players.set(id, player);
       }
-      if (id !== this.network.myId) {
-        player.x = ps.x;
-        player.y = ps.y;
-        player.angle = ps.angle;
-      }
+      // The hub is authoritative for every player, including the local one.
+      // Client prediction is temporary and is reconciled by each snapshot.
+      player.x = ps.x;
+      player.y = ps.y;
+      player.angle = ps.angle;
       player.hp = ps.hp ?? BASE_HP;
       player.armor = ps.armor ?? 0;
       player.weapon = ps.weapon || 'blaster';
@@ -639,7 +712,7 @@ export class ArenaGame {
       const b = this.bullets[bi];
       for (let zi = this.zombies.length - 1; zi >= 0; zi--) {
         const z = this.zombies[zi];
-        const d = dist(b.x, b.y, z.x, z.y);
+        const d = bulletTargetDistance(b, z);
         if (d > z.r + 3) continue;
         z.hp -= (b.damage || 25);
         this._sparks.push({ x: b.x, y: b.y, life: 7, color: z.color });
@@ -806,6 +879,8 @@ export class ArenaGame {
   }
 
   _handleEnd(results) {
+    if (results?.gameId !== this.gameId) return;
+    this._leaveSent = true;
     this.running = false;
 
     // Draw final frame
@@ -849,6 +924,17 @@ export class ArenaGame {
   // ---------- Cleanup ----------
 
   stop() {
+    if (this.running && this.isHub && this.gameId && this.network.broadcastArenaEnd) {
+      this.network.broadcastArenaEnd({
+        gameId: this.gameId,
+        winner: null,
+        cancelled: true,
+        reason: 'hub-left',
+      });
+    } else if (this.running && !this.isHub && !this._leaveSent && this.gameId && this.network.sendArenaLeave) {
+      this._leaveSent = true;
+      this.network.sendArenaLeave(this.gameId);
+    }
     this.running = false;
     if (this.animFrame) {
       cancelAnimationFrame(this.animFrame);

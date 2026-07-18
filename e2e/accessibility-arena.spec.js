@@ -1,7 +1,11 @@
 import { test, expect } from '@playwright/test';
 
+function isolatedLobbyUrl(label) {
+  return `/example/?e2e=${label}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 async function openLobby(page) {
-  await page.goto('/example/');
+  await page.goto(isolatedLobbyUrl('lobby'));
   const lobbyButton = page.locator('#rpjs-btn-lobby');
   await expect(lobbyButton).toBeVisible();
   await lobbyButton.click();
@@ -11,7 +15,7 @@ async function openLobby(page) {
 }
 
 async function openHubMenu(page) {
-  await page.goto('/example/');
+  await page.goto(isolatedLobbyUrl('hub'));
   const hubButton = page.locator('#rpjs-btn-hub');
   await expect(hubButton).toBeVisible();
   await hubButton.click();

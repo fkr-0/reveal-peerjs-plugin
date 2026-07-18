@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { HubMenu } from '../src/hub-menu.js';
 
 async function waitForPollHarness(page) {
   await page.goto('/e2e/fixtures/poll-harness.html');
@@ -56,6 +57,26 @@ test.describe('Hub poll options and visualization', () => {
 
     const sentResults = await page.evaluate(() => window.__rpjsPollHarness.calls.filter(call => call.type === 'sendPollResults'));
     expect(sentResults).toEqual([]);
+  });
+
+  test('single-choice poll aggregation counts at most one valid answer per voter', () => {
+    const menu = new HubMenu({ myUser: { username: 'Hub' } }, null);
+    const results = menu._buildPollResults({
+      pollId: 'poll-single',
+      question: 'Choose one',
+      answers: ['Architecture', 'Testing', 'Speed'],
+      mode: 'single',
+    }, new Map([
+      ['peer-1', ['Architecture', 'Testing']],
+      ['peer-2', ['Bogus', 'Testing']],
+      ['peer-3', 'Bogus'],
+    ]));
+
+    expect(results.totalResponses).toBe(3);
+    expect(results.totalSelections).toBe(2);
+    expect(results.answers.find(answer => answer.text === 'Architecture')).toMatchObject({ count: 1, percentage: 33 });
+    expect(results.answers.find(answer => answer.text === 'Testing')).toMatchObject({ count: 1, percentage: 33 });
+    expect(results.answers.find(answer => answer.text === 'Speed')).toMatchObject({ count: 0, percentage: 0 });
   });
 
   test('result cards expose ranked bars and winner markers for clearer visualization', async ({ page }) => {

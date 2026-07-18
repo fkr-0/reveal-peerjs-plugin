@@ -10,10 +10,11 @@
 import { CLOSE_ICON } from './icons.js';
 
 export class PongGame {
-  constructor(network, isInitiator = true, opponentPeerId = null, { onStart, onStop } = {}) {
+  constructor(network, isInitiator = true, opponentPeerId = null, { onStart, onStop, gameId = null } = {}) {
     this.network = network;
     this.isInitiator = isInitiator; // left side
     this.opponentPeerId = opponentPeerId;
+    this.gameId = gameId;
     this._onStartCb = onStart || null;
     this._onStopCb = onStop || null;
     this.el = null;
@@ -39,11 +40,15 @@ export class PongGame {
     this.baseSpeed = 4;
     this.currentSpeed = 4;
     this.hitCount = 0;
+    this._stateFrame = 0;
+    this._lastAppliedFrame = -1;
+    this._endSent = false;
 
     this._onPongMove = null;
     this._onPongState = null;
     this._onPongAccept = null;
     this._onPongDecline = null;
+    this._onPongEnd = null;
   }
 
   render() {
@@ -73,7 +78,7 @@ export class PongGame {
 
     // Listen for opponent paddle moves
     this._onPongMove = (payload) => {
-      if (payload.from === this.opponentPeerId) {
+      if (payload.gameId === this.gameId && payload.from === this.opponentPeerId) {
         // Opponent's y position (0-1 normalized)
         const targetY = payload.y * this.H;
         if (this.isInitiator) {
@@ -86,11 +91,19 @@ export class PongGame {
     this.network.on('pong-move', this._onPongMove);
 
     this._onPongState = (payload) => {
+      if (payload.gameId !== this.gameId) return;
       if (payload.from !== this.opponentPeerId) return;
       if (payload.to && payload.to !== this.network.myId) return;
       this._applyState(payload.state);
     };
     this.network.on('pong-state', this._onPongState);
+
+    this._onPongEnd = (payload) => {
+      if (payload.gameId !== this.gameId || payload.from !== this.opponentPeerId) return;
+      this._endSent = true;
+      this.stop();
+    };
+    this.network.on('pong-end', this._onPongEnd);
   }
 
   _updatePlayerNames() {
@@ -138,7 +151,7 @@ export class PongGame {
       }
       // Send to opponent
       const normalizedY = this.mouseY / this.H;
-      this.network.sendPongMove(this.opponentPeerId, Math.max(0, Math.min(1, normalizedY)));
+      this.network.sendPongMove(this.opponentPeerId, Math.max(0, Math.min(1, normalizedY)), this.gameId);
     };
     this.el.addEventListener('mousemove', this._mouseHandler);
 
@@ -153,7 +166,7 @@ export class PongGame {
         this.rightY = this.mouseY;
       }
       const normalizedY = this.mouseY / this.H;
-      this.network.sendPongMove(this.opponentPeerId, Math.max(0, Math.min(1, normalizedY)));
+      this.network.sendPongMove(this.opponentPeerId, Math.max(0, Math.min(1, normalizedY)), this.gameId);
     };
     this.el.addEventListener('touchstart', this._touchHandler, { passive: false });
     this.el.addEventListener('touchmove', this._touchHandler, { passive: false });
@@ -182,6 +195,14 @@ export class PongGame {
   }
 
   stop() {
+    if (!this._endSent && this.gameId && this.opponentPeerId && this.network.sendPongEnd) {
+      this._endSent = true;
+      this.network.sendPongEnd(this.opponentPeerId, {
+        reason: 'player-left',
+        scoreLeft: this.scoreLeft,
+        scoreRight: this.scoreRight,
+      }, this.gameId);
+    }
     this.running = false;
     if (this.animFrame) {
       cancelAnimationFrame(this.animFrame);
@@ -192,6 +213,9 @@ export class PongGame {
     }
     if (this._onPongState) {
       this.network.off('pong-state', this._onPongState);
+    }
+    if (this._onPongEnd) {
+      this.network.off('pong-end', this._onPongEnd);
     }
     document.removeEventListener('keydown', this._keyHandler, true);
     window.removeEventListener('resize', this._resizeHandler);
@@ -215,6 +239,8 @@ export class PongGame {
     if (!this.isInitiator) return;
 
     // Move ball
+    const prevX = this.ball.x;
+    const prevY = this.ball.y;
     this.ball.x += this.ball.vx;
     this.ball.y += this.ball.vy;
 
@@ -226,23 +252,15 @@ export class PongGame {
 
     // Left paddle collision
     const leftPaddleX = this.PADDLE_MARGIN;
-    if (
-      this.ball.x - this.BALL_R <= leftPaddleX + this.PADDLE_W &&
-      this.ball.x - this.BALL_R >= leftPaddleX &&
-      this.ball.y >= this.leftY - this.PADDLE_H / 2 &&
-      this.ball.y <= this.leftY + this.PADDLE_H / 2
-    ) {
+    if (this._ballIntersectsLeftPaddle(prevX, prevY, leftPaddleX)) {
+      this.ball.x = leftPaddleX + this.PADDLE_W + this.BALL_R;
       this._handlePaddleHit(1);
     }
 
     // Right paddle collision
     const rightPaddleX = this.W - this.PADDLE_MARGIN - this.PADDLE_W;
-    if (
-      this.ball.x + this.BALL_R >= rightPaddleX &&
-      this.ball.x + this.BALL_R <= rightPaddleX + this.PADDLE_W &&
-      this.ball.y >= this.rightY - this.PADDLE_H / 2 &&
-      this.ball.y <= this.rightY + this.PADDLE_H / 2
-    ) {
+    if (this._ballIntersectsRightPaddle(prevX, prevY, rightPaddleX)) {
+      this.ball.x = rightPaddleX - this.BALL_R;
       this._handlePaddleHit(-1);
     }
 
@@ -272,6 +290,7 @@ export class PongGame {
 
   _captureState() {
     return {
+      frame: this._stateFrame,
       ball: { ...this.ball },
       leftY: this.leftY,
       rightY: this.rightY,
@@ -284,6 +303,9 @@ export class PongGame {
 
   _applyState(state) {
     if (!state) return;
+    const frame = Number.isFinite(state.frame) ? state.frame : 0;
+    if (frame <= this._lastAppliedFrame) return;
+    this._lastAppliedFrame = frame;
     if (state.ball) this.ball = { ...state.ball };
     if (typeof state.leftY === 'number') this.leftY = state.leftY;
     if (typeof state.rightY === 'number') this.rightY = state.rightY;
@@ -295,8 +317,47 @@ export class PongGame {
   }
 
   _sendState() {
-    if (!this.isInitiator || !this.opponentPeerId || !this.network.sendPongState) return;
-    this.network.sendPongState(this.opponentPeerId, this._captureState());
+    if (!this.isInitiator || !this.opponentPeerId || !this.gameId || !this.network.sendPongState) return;
+    this._stateFrame++;
+    this.network.sendPongState(this.opponentPeerId, this._captureState(), this.gameId);
+  }
+
+  _ballOverlapsPaddleY(y, paddleY) {
+    return y >= paddleY - this.PADDLE_H / 2 - this.BALL_R &&
+      y <= paddleY + this.PADDLE_H / 2 + this.BALL_R;
+  }
+
+  _interpolatedBallY(prevX, prevY, targetX) {
+    const dx = this.ball.x - prevX;
+    if (Math.abs(dx) < 0.0001) return this.ball.y;
+    const t = Math.max(0, Math.min(1, (targetX - prevX) / dx));
+    return prevY + (this.ball.y - prevY) * t;
+  }
+
+  _ballIntersectsLeftPaddle(prevX, prevY, paddleX) {
+    const paddleRight = paddleX + this.PADDLE_W;
+    const alreadyInside = this.ball.x - this.BALL_R <= paddleRight &&
+      this.ball.x - this.BALL_R >= paddleX;
+    const sweptThrough = prevX - this.BALL_R >= paddleRight &&
+      this.ball.x - this.BALL_R <= paddleRight;
+    if (!alreadyInside && !sweptThrough) return false;
+    const collisionY = sweptThrough
+      ? this._interpolatedBallY(prevX, prevY, paddleRight + this.BALL_R)
+      : this.ball.y;
+    return this._ballOverlapsPaddleY(collisionY, this.leftY);
+  }
+
+  _ballIntersectsRightPaddle(prevX, prevY, paddleX) {
+    const paddleRight = paddleX + this.PADDLE_W;
+    const alreadyInside = this.ball.x + this.BALL_R >= paddleX &&
+      this.ball.x + this.BALL_R <= paddleRight;
+    const sweptThrough = prevX + this.BALL_R <= paddleX &&
+      this.ball.x + this.BALL_R >= paddleX;
+    if (!alreadyInside && !sweptThrough) return false;
+    const collisionY = sweptThrough
+      ? this._interpolatedBallY(prevX, prevY, paddleX - this.BALL_R)
+      : this.ball.y;
+    return this._ballOverlapsPaddleY(collisionY, this.rightY);
   }
 
   _handlePaddleHit(direction) {
@@ -359,6 +420,15 @@ export class PongGame {
 
   _gameOver(winner) {
     this.running = false;
+
+    if (this.isInitiator && this.gameId && this.network.sendPongEnd) {
+      this._endSent = true;
+      this.network.sendPongEnd(this.opponentPeerId, {
+        winner,
+        scoreLeft: this.scoreLeft,
+        scoreRight: this.scoreRight,
+      }, this.gameId);
+    }
 
     const isInitiatorWinner = (winner === 'left' && this.isInitiator) || (winner === 'right' && !this.isInitiator);
     const winnerName = isInitiatorWinner ? this.network.myUser.username : 'Opponent';

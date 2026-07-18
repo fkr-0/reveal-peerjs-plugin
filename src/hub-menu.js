@@ -241,6 +241,8 @@ export class HubMenu {
 
     if (poll.shareResults !== false) {
       this.network.sendPollResults(results);
+    } else {
+      this.network.closePoll?.(poll.pollId);
     }
 
     this._renderPollResults(results);
@@ -248,17 +250,16 @@ export class HubMenu {
 
   _buildPollResults(poll, responses) {
     const counts = new Map(poll.answers.map(answer => [answer, 0]));
+    const allowedAnswers = new Set(poll.answers);
+    const mode = poll.mode || 'single';
     let totalSelections = 0;
 
     for (const [, rawAnswer] of responses) {
-      const answers = Array.isArray(rawAnswer) ? rawAnswer : [rawAnswer];
-      const uniqueAnswers = [...new Set(answers.map(answer => String(answer).trim()).filter(Boolean))];
+      const answers = this._normalizePollAnswer(rawAnswer, allowedAnswers, mode);
 
-      for (const answer of uniqueAnswers) {
-        if (counts.has(answer)) {
-          counts.set(answer, counts.get(answer) + 1);
-          totalSelections++;
-        }
+      for (const answer of answers) {
+        counts.set(answer, counts.get(answer) + 1);
+        totalSelections++;
       }
     }
 
@@ -288,6 +289,20 @@ export class HubMenu {
         isWinner: winningCount > 0 && answer.count === winningCount,
       })),
     };
+  }
+
+  _normalizePollAnswer(rawAnswer, allowedAnswers, mode) {
+    const submitted = Array.isArray(rawAnswer) ? rawAnswer : [rawAnswer];
+    const uniqueValid = [];
+
+    for (const answer of submitted) {
+      const normalized = String(answer).trim();
+      if (!normalized || !allowedAnswers.has(normalized) || uniqueValid.includes(normalized)) continue;
+      uniqueValid.push(normalized);
+      if (mode !== 'multiple') break;
+    }
+
+    return uniqueValid;
   }
 
   _renderPollResults(results) {

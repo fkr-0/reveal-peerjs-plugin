@@ -7,11 +7,10 @@
  * Both /dist/ and /example/ are accessible.
  */
 
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { createServer } from 'http';
-import { parse } from 'url';
 import { readFileSync, existsSync, statSync } from 'fs';
 import { extname } from 'path';
 
@@ -74,8 +73,8 @@ function serveFile(res, filePath) {
 }
 
 const server = createServer((req, res) => {
-  const parsedUrl = parse(req.url);
-  let pathname = parsedUrl.pathname;
+  const requestUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  let pathname = requestUrl.pathname;
 
   // Default to /example/ for root
   if (pathname === '/') {
@@ -92,6 +91,19 @@ const server = createServer((req, res) => {
   serveFile(res, pathname);
 });
 
+// Playwright treats an open port as a ready server. Build once before listening
+// so the first test can never observe a temporarily missing dist bundle.
+const initialBuild = spawnSync('npm', ['run', 'build'], {
+  cwd: rootDir,
+  shell: false,
+  stdio: 'inherit',
+});
+
+if (initialBuild.status !== 0) {
+  console.error(`Initial build failed with code ${initialBuild.status}`);
+  process.exit(initialBuild.status || 1);
+}
+
 server.listen(PORT, () => {
   console.log('\n  RevealPeerJS Dev Server\n');
   console.log(`  Serving at http://localhost:${PORT}`);
@@ -102,7 +114,7 @@ server.listen(PORT, () => {
 // Build process (vite build --watch)
 const build = spawn('npm', ['run', 'dev'], {
   cwd: rootDir,
-  shell: true,
+  shell: false,
   stdio: 'pipe',
 });
 

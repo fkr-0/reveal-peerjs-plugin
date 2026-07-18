@@ -10,7 +10,27 @@
  */
 
 import Peer from 'peerjs';
-import { MSG, createMessage } from './protocol.js';
+import { HUB_AUTHORITATIVE_TYPES, MSG, createMessage } from './protocol.js';
+
+function createSessionId(prefix) {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  const entropy = uuid || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}-${entropy}`;
+}
+
+function normalizeUsername(value, fallback = 'Visitor') {
+  if (typeof value !== 'string') return fallback;
+  const normalized = value.trim().slice(0, 64);
+  return normalized || fallback;
+}
+
+function normalizeColor(value, fallback = '#4fc3f7') {
+  return typeof value === 'string' && /^#[0-9a-f]{3,8}$/i.test(value) ? value : fallback;
+}
+
+function normalizeChatText(value) {
+  return typeof value === 'string' ? value.slice(0, 4000) : '';
+}
 
 function hashString(str) {
   let hash = 0;
@@ -42,7 +62,13 @@ export class LobbyNetwork {
     this._visitorCounter = 0;
     this._destroyed = false;
     this._hubSyncSeq = 0;
+    this._hubEpoch = createSessionId('hub');
     this._lastHubSyncSeqByType = new Map();
+    this._acceptedHubEpochById = new Map();
+    this._retiredHubEpochs = new Set();
+    this._activePollId = null;
+    this._activeArenaId = null;
+    this._pongSessions = new Map();
   }
 
   on(event, callback) {
@@ -65,6 +91,12 @@ export class LobbyNetwork {
         try { cb(data); } catch (e) { console.error('[RevealPeerJS] Listener error:', e); }
       }
     }
+  }
+
+  sendArenaLeave(gameId) {
+    if (this.isHub || !gameId || gameId !== this._activeArenaId) return;
+    this._sendToPeer(this.lobbyId, createMessage(MSG.ARENA_LEAVE, { gameId }));
+    this._activeArenaId = null;
   }
 
   /**
@@ -200,7 +232,8 @@ export class LobbyNetwork {
         reject(err);
       });
 
-      // Visitor can also receive direct connections (for pong)
+      // Unexpected direct connections are retained only for clean shutdown;
+      // application messages from them are rejected by _handleIncomingMessage.
       visitorPeer.on('connection', (conn) => {
         this._handleDirectConnection(conn);
       });
@@ -220,6 +253,10 @@ export class LobbyNetwork {
     conn.on('close', () => {
       const user = this.users.get(conn.peer);
       if (user) {
+        this._endPongSessionsForPeer(conn.peer);
+        if (this._activeArenaId) {
+          this._emit('arena-leave', { gameId: this._activeArenaId, peerId: conn.peer });
+        }
         this.users.delete(conn.peer);
         this.connections.delete(conn.peer);
         this._broadcastFromHub(createMessage(MSG.LEAVE, { id: conn.peer, username: user.username }));
@@ -254,24 +291,28 @@ export class LobbyNetwork {
     if (!data || !data.type) return;
 
     const msg = data;
+    if (!msg.payload || typeof msg.payload !== 'object') msg.payload = {};
 
     switch (msg.type) {
       case MSG.JOIN: {
+        const peerId = fromConn.peer;
+        if (!peerId || this.users.has(peerId)) break;
         this._visitorCounter++;
         // Always assign a unique name if user hasn't set one
-        const assignedName = msg.payload.username && !msg.payload.username.startsWith('Visitor')
-          ? msg.payload.username
+        const requestedName = normalizeUsername(msg.payload.username);
+        const assignedName = !requestedName.startsWith('Visitor')
+          ? requestedName
           : `Visitor #${this._visitorCounter}`;
 
         const user = {
-          id: msg.payload.id,
+          id: peerId,
           username: assignedName,
-          color: msg.payload.color || '#4fc3f7',
+          color: normalizeColor(msg.payload.color),
           isHub: false,
           number: this._visitorCounter,
           conn: fromConn,
         };
-        this.users.set(msg.payload.id, user);
+        this.users.set(peerId, user);
 
         // Send the new user their assigned number and current user list
         fromConn.send(createMessage(MSG.USER_LIST, {
@@ -284,19 +325,21 @@ export class LobbyNetwork {
         // Broadcast updated user list to all except the new visitor (who already got theirs)
         this._broadcastFromHub(createMessage(MSG.USER_LIST, {
           users: this.getUserList(),
-        }), msg.payload.id);
+        }), peerId);
 
         this._emit('user-list', this.getUserList());
-        this._emit('peer-connected', { peerId: msg.payload.id, username: user.username });
+        this._emit('peer-connected', { peerId, username: user.username });
         break;
       }
 
       case MSG.CHAT: {
+        const sender = this.users.get(fromConn.peer);
+        if (!sender) break;
         const chatMsg = {
-          from: msg.payload.from || fromConn.peer,
-          username: msg.payload.username,
-          color: msg.payload.color,
-          text: msg.payload.text,
+          from: fromConn.peer,
+          username: sender.username,
+          color: sender.color,
+          text: normalizeChatText(msg.payload.text),
           timestamp: msg.timestamp,
           private: false,
         };
@@ -308,12 +351,14 @@ export class LobbyNetwork {
       }
 
       case MSG.PRIVATE_CHAT: {
+        const sender = this.users.get(fromConn.peer);
+        if (!sender || !this._isKnownPeer(msg.payload.to)) break;
         const privMsg = {
-          from: msg.payload.from || fromConn.peer,
+          from: fromConn.peer,
           to: msg.payload.to,
-          username: msg.payload.username,
-          color: msg.payload.color,
-          text: msg.payload.text,
+          username: sender.username,
+          color: sender.color,
+          text: normalizeChatText(msg.payload.text),
           timestamp: msg.timestamp,
           private: true,
         };
@@ -326,7 +371,7 @@ export class LobbyNetwork {
 
       case MSG.SLIDE_CHANGE: {
         // Visitor reported slide change (for follow mode)
-        if (this.followMode && msg.payload.from === this._followTarget) {
+        if (this.followMode && fromConn.peer === this._followTarget) {
           this._broadcastFromHub(createMessage(MSG.JUMP_SLIDE, {
             indexh: msg.payload.indexh,
             indexv: msg.payload.indexv,
@@ -336,7 +381,19 @@ export class LobbyNetwork {
       }
 
       case MSG.POLL_ANSWER: {
-        this._emit('poll-answer', msg.payload);
+        const sender = this.users.get(fromConn.peer);
+        if (!sender || msg.payload.pollId !== this._activePollId) break;
+        this._emit('poll-answer', {
+          pollId: msg.payload.pollId,
+          answer: msg.payload.answer,
+          from: fromConn.peer,
+          username: sender.username,
+        });
+        break;
+      }
+
+      case MSG.PONG_INVITE: {
+        this._handlePongInviteFromPeer(msg.payload, fromConn.peer);
         break;
       }
 
@@ -346,18 +403,13 @@ export class LobbyNetwork {
       case MSG.PONG_DECLINE:
       case MSG.PONG_SCORE:
       case MSG.PONG_END: {
-        // Hub is the single relay for pong traffic. Stamp forwarded messages so
-        // receivers can discard stale state and clients cannot spoof sender IDs.
-        const payload = { ...msg.payload, from: fromConn.peer };
-        if (payload.to) {
-          this._sendToPeer(payload.to, this._createHubMessage(msg.type, payload));
-        }
-        this._emit(msg.type, payload);
+        this._routePongMessage(msg.type, msg.payload, fromConn.peer);
         break;
       }
 
       case MSG.ARENA_INPUT:
       case MSG.ARENA_SHOOT: {
+        if (!this._activeArenaId || msg.payload.gameId !== this._activeArenaId) break;
         // Inputs are commands for the authoritative hub simulation only.
         // Rebroadcasting commands lets visitors run partial remote simulations
         // and causes divergence from the hub state stream.
@@ -365,12 +417,21 @@ export class LobbyNetwork {
         break;
       }
 
+      case MSG.ARENA_LEAVE: {
+        if (!this._activeArenaId || msg.payload.gameId !== this._activeArenaId) break;
+        this._emit('arena-leave', {
+          gameId: this._activeArenaId,
+          peerId: fromConn.peer,
+        });
+        break;
+      }
+
       case MSG.USERNAME_UPDATE: {
-        const u = this.users.get(msg.payload.id);
+        const u = this.users.get(fromConn.peer);
         if (u) {
-          u.username = msg.payload.username;
-          u.color = msg.payload.color;
-          this.users.set(msg.payload.id, u);
+          u.username = normalizeUsername(msg.payload.username, u.username);
+          u.color = normalizeColor(msg.payload.color, u.color);
+          this.users.set(fromConn.peer, u);
           this._broadcastFromHub(createMessage(MSG.USER_LIST, {
             users: this.getUserList(),
           }));
@@ -391,6 +452,11 @@ export class LobbyNetwork {
     if (!data || !data.type) return;
 
     const msg = data;
+    if (!msg.payload || typeof msg.payload !== 'object') return;
+
+    // The lobby is deliberately hub-centric. Direct PeerJS connections are not
+    // trusted as a source of application messages, even if they claim a hub ID.
+    if (!this.isHub && fromPeerId !== this.lobbyId) return;
 
     switch (msg.type) {
       case MSG.USER_LIST: {
@@ -454,12 +520,17 @@ export class LobbyNetwork {
       }
 
       case MSG.POLL_START: {
+        if (!this._shouldAcceptHubSyncedMessage(msg, fromPeerId, true)) break;
+        this._activePollId = msg.payload.pollId;
         this._emit('poll-start', msg.payload);
         break;
       }
 
       case MSG.POLL_RESULTS: {
+        if (!this._shouldAcceptHubSyncedMessage(msg, fromPeerId, true)) break;
+        if (this._activePollId && msg.payload.pollId !== this._activePollId) break;
         this._emit('poll-results', msg.payload);
+        this._activePollId = null;
         break;
       }
 
@@ -470,7 +541,7 @@ export class LobbyNetwork {
       case MSG.PONG_STATE:
       case MSG.PONG_SCORE:
       case MSG.PONG_END: {
-        if (this._shouldAcceptHubSyncedMessage(msg)) {
+        if (this._shouldAcceptHubSyncedMessage(msg, fromPeerId, true)) {
           this._emit(msg.type, msg.payload);
         }
         break;
@@ -480,9 +551,16 @@ export class LobbyNetwork {
       case MSG.ARENA_STATE:
       case MSG.ARENA_HIT:
       case MSG.ARENA_END: {
-        if (this._shouldAcceptHubSyncedMessage(msg)) {
+        if (!this._shouldAcceptHubSyncedMessage(msg, fromPeerId, true)) break;
+        if (msg.type === MSG.ARENA_START) {
+          this._activeArenaId = msg.payload.gameId;
+        } else if (!this._activeArenaId || msg.payload.gameId !== this._activeArenaId) {
+          break;
+        }
+        {
           this._emit(msg.type, msg.payload);
         }
+        if (msg.type === MSG.ARENA_END) this._activeArenaId = null;
         break;
       }
 
@@ -527,23 +605,124 @@ export class LobbyNetwork {
     }
   }
 
+  _isKnownPeer(peerId) {
+    return Boolean(peerId) && (peerId === this.myId || this.users.has(peerId));
+  }
+
+  _deliverHubMessage(type, payload) {
+    const msg = this._createHubMessage(type, payload);
+    if (payload.to === this.myId) {
+      this._emit(type, msg.payload);
+    } else {
+      this._sendToPeer(payload.to, msg);
+    }
+    return msg;
+  }
+
+  _endPongSessionsForPeer(peerId) {
+    for (const [gameId, session] of this._pongSessions) {
+      if (session.initiatorId !== peerId && session.opponentId !== peerId) continue;
+      const otherPeerId = session.initiatorId === peerId ? session.opponentId : session.initiatorId;
+      this._deliverHubMessage(MSG.PONG_END, {
+        gameId,
+        from: peerId,
+        to: otherPeerId,
+        result: { reason: 'peer-disconnected' },
+      });
+      this._pongSessions.delete(gameId);
+    }
+  }
+
+  _handlePongInviteFromPeer(requestedPayload, senderId) {
+    const sender = this.users.get(senderId);
+    const targetId = requestedPayload?.to;
+    if (!sender || !this._isKnownPeer(targetId) || targetId === senderId) return null;
+
+    const gameId = requestedPayload.gameId || createSessionId('pong');
+    const session = {
+      gameId,
+      initiatorId: senderId,
+      opponentId: targetId,
+      status: 'pending',
+    };
+    this._pongSessions.set(gameId, session);
+
+    return this._deliverHubMessage(MSG.PONG_INVITE, {
+      gameId,
+      from: senderId,
+      fromUsername: sender.username,
+      to: targetId,
+    });
+  }
+
+  _routePongMessage(type, requestedPayload, senderId) {
+    const gameId = requestedPayload?.gameId;
+    const session = this._pongSessions.get(gameId);
+    if (!session) return null;
+
+    const isInitiator = senderId === session.initiatorId;
+    const isOpponent = senderId === session.opponentId;
+    if (!isInitiator && !isOpponent) return null;
+
+    const expectedTarget = isInitiator ? session.opponentId : session.initiatorId;
+    if (requestedPayload.to !== expectedTarget) return null;
+
+    if (type === MSG.PONG_ACCEPT || type === MSG.PONG_DECLINE) {
+      if (!isOpponent || session.status !== 'pending') return null;
+      session.status = type === MSG.PONG_ACCEPT ? 'active' : 'declined';
+    } else {
+      if (session.status !== 'active') return null;
+      if ([MSG.PONG_STATE, MSG.PONG_SCORE].includes(type) && !isInitiator) return null;
+    }
+
+    const payload = {
+      ...requestedPayload,
+      gameId,
+      from: senderId,
+      to: expectedTarget,
+    };
+    const msg = this._deliverHubMessage(type, payload);
+
+    if (type === MSG.PONG_DECLINE || type === MSG.PONG_END) {
+      this._pongSessions.delete(gameId);
+    }
+    return msg;
+  }
+
 
   _createHubMessage(type, payload = {}) {
     return createMessage(type, {
       ...payload,
       hubSync: {
         hubId: this.myId,
+        epoch: this._hubEpoch,
         seq: ++this._hubSyncSeq,
       },
     });
   }
 
-  _shouldAcceptHubSyncedMessage(msg) {
+  _shouldAcceptHubSyncedMessage(msg, fromPeerId = null, required = false) {
     const hubSync = msg?.payload?.hubSync;
-    if (!hubSync || typeof hubSync.seq !== 'number') return true;
+    const mustBeAuthoritative = required || HUB_AUTHORITATIVE_TYPES.has(msg?.type);
+    if (!hubSync || typeof hubSync.seq !== 'number') return !mustBeAuthoritative;
 
+    const expectedHubId = this.lobbyId;
     const hubId = hubSync.hubId || 'unknown-hub';
-    const key = `${msg.type}:${hubId}`;
+    if (!this.isHub && expectedHubId && hubId !== expectedHubId) return false;
+    if (!this.isHub && fromPeerId && fromPeerId !== expectedHubId) return false;
+
+    const epoch = hubSync.epoch;
+    if (typeof epoch !== 'string' || !epoch) return false;
+    const epochKey = `${hubId}:${epoch}`;
+    if (this._retiredHubEpochs.has(epochKey)) return false;
+
+    const acceptedEpoch = this._acceptedHubEpochById.get(hubId);
+    if (acceptedEpoch && acceptedEpoch !== epoch) {
+      this._retiredHubEpochs.add(`${hubId}:${acceptedEpoch}`);
+    }
+    this._acceptedHubEpochById.set(hubId, epoch);
+
+    const key = `${msg.type}:${hubId}:${epoch}`;
     const lastSeq = this._lastHubSyncSeqByType.get(key) || 0;
     if (hubSync.seq <= lastSeq) return false;
 
@@ -615,15 +794,18 @@ export class LobbyNetwork {
    * Public: Hub starts a poll
    */
   startPoll(poll) {
-    if (!this.isHub) return;
-    this._broadcastFromHub(createMessage(MSG.POLL_START, poll));
-    this._emit('poll-start', poll);
+    if (!this.isHub || !poll?.pollId) return;
+    this._activePollId = poll.pollId;
+    const msg = this._createHubMessage(MSG.POLL_START, poll);
+    this._broadcastFromHub(msg);
+    this._emit('poll-start', msg.payload);
   }
 
   /**
    * Public: Visitor answers a poll
    */
   answerPoll(pollId, answer) {
+    if (!pollId || (this._activePollId && pollId !== this._activePollId)) return;
     const msg = createMessage(MSG.POLL_ANSWER, {
       pollId,
       answer,
@@ -642,9 +824,17 @@ export class LobbyNetwork {
    * Public: Send poll results to all
    */
   sendPollResults(results) {
-    if (!this.isHub) return;
-    this._broadcastFromHub(createMessage(MSG.POLL_RESULTS, results));
-    this._emit('poll-results', results);
+    if (!this.isHub || !results?.pollId || results.pollId !== this._activePollId) return;
+    const msg = this._createHubMessage(MSG.POLL_RESULTS, results);
+    this._broadcastFromHub(msg);
+    this._emit('poll-results', msg.payload);
+    this._activePollId = null;
+  }
+
+  closePoll(pollId) {
+    if (!this.isHub || pollId !== this._activePollId) return false;
+    this._activePollId = null;
+    return true;
   }
 
   /**
@@ -689,31 +879,57 @@ export class LobbyNetwork {
    * Public: Send pong invite
    */
   sendPongInvite(targetPeerId) {
-    const msg = createMessage(MSG.PONG_INVITE, {
+    if (!this._isKnownPeer(targetPeerId) || targetPeerId === this.myId) return null;
+    const gameId = createSessionId('pong');
+    const payload = {
+      gameId,
       from: this.myId,
       fromUsername: this.myUser.username,
       to: targetPeerId,
-    });
+    };
 
     if (this.isHub) {
-      this._sendToPeer(targetPeerId, msg);
+      this._pongSessions.set(gameId, {
+        gameId,
+        initiatorId: this.myId,
+        opponentId: targetPeerId,
+        status: 'pending',
+      });
+      this._deliverHubMessage(MSG.PONG_INVITE, payload);
     } else {
-      this._sendToPeer(this.lobbyId, msg);
+      this._sendToPeer(this.lobbyId, createMessage(MSG.PONG_INVITE, payload));
     }
+    return gameId;
+  }
+
+  respondToPongInvite(invite, accepted) {
+    if (!invite?.gameId || invite.to !== this.myId) return;
+    const type = accepted ? MSG.PONG_ACCEPT : MSG.PONG_DECLINE;
+    const payload = {
+      gameId: invite.gameId,
+      from: this.myId,
+      fromUsername: this.myUser.username,
+      to: invite.from,
+    };
+    if (this.isHub) {
+      return this._routePongMessage(type, payload, this.myId);
+    }
+    this._sendToPeer(this.lobbyId, createMessage(type, payload));
   }
 
   /**
    * Public: Send pong move
    */
-  sendPongMove(targetPeerId, y) {
+  sendPongMove(targetPeerId, y, gameId) {
     const payload = {
+      gameId,
       from: this.myId,
       to: targetPeerId,
       y,
     };
 
     if (this.isHub) {
-      this._sendToPeer(targetPeerId, this._createHubMessage(MSG.PONG_MOVE, payload));
+      this._routePongMessage(MSG.PONG_MOVE, payload, this.myId);
     } else {
       this._sendToPeer(this.lobbyId, createMessage(MSG.PONG_MOVE, payload));
     }
@@ -722,17 +938,27 @@ export class LobbyNetwork {
   /**
    * Public: Send authoritative pong state through the hub relay
    */
-  sendPongState(targetPeerId, state) {
+  sendPongState(targetPeerId, state, gameId) {
     const payload = {
+      gameId,
       from: this.myId,
       to: targetPeerId,
       state,
     };
 
     if (this.isHub) {
-      this._sendToPeer(targetPeerId, this._createHubMessage(MSG.PONG_STATE, payload));
+      this._routePongMessage(MSG.PONG_STATE, payload, this.myId);
     } else {
       this._sendToPeer(this.lobbyId, createMessage(MSG.PONG_STATE, payload));
+    }
+  }
+
+  sendPongEnd(targetPeerId, result, gameId) {
+    const payload = { gameId, from: this.myId, to: targetPeerId, result };
+    if (this.isHub) {
+      this._routePongMessage(MSG.PONG_END, payload, this.myId);
+    } else {
+      this._sendToPeer(this.lobbyId, createMessage(MSG.PONG_END, payload));
     }
   }
 
@@ -740,7 +966,8 @@ export class LobbyNetwork {
    * Public: Hub starts an arena game
    */
   startArena(gameConfig) {
-    if (!this.isHub) return;
+    if (!this.isHub || !gameConfig?.gameId) return;
+    this._activeArenaId = gameConfig.gameId;
     const msg = this._createHubMessage(MSG.ARENA_START, gameConfig);
     this._broadcastFromHub(msg);
     this._emit('arena-start', msg.payload);
@@ -750,7 +977,7 @@ export class LobbyNetwork {
    * Public: Hub broadcasts arena state
    */
   broadcastArenaState(state) {
-    if (!this.isHub) return;
+    if (!this.isHub || state?.gameId !== this._activeArenaId) return;
     const msg = this._createHubMessage(MSG.ARENA_STATE, state);
     this._broadcastFromHub(msg);
     // Also emit locally for hub's own game
@@ -761,6 +988,7 @@ export class LobbyNetwork {
    * Public: Send arena input (movement) to hub
    */
   sendArenaInput(input) {
+    if (!input?.gameId || input.gameId !== this._activeArenaId) return;
     const msg = createMessage(MSG.ARENA_INPUT, {
       from: this.myId,
       ...input,
@@ -776,6 +1004,7 @@ export class LobbyNetwork {
    * Public: Send arena shoot to hub
    */
   sendArenaShoot(shoot) {
+    if (!shoot?.gameId || shoot.gameId !== this._activeArenaId) return;
     const msg = createMessage(MSG.ARENA_SHOOT, {
       from: this.myId,
       ...shoot,
@@ -791,8 +1020,11 @@ export class LobbyNetwork {
    * Public: Hub broadcasts arena hit
    */
   broadcastArenaHit(hit) {
-    if (!this.isHub) return;
-    const msg = this._createHubMessage(MSG.ARENA_HIT, hit);
+    if (!this.isHub || !this._activeArenaId) return;
+    const msg = this._createHubMessage(MSG.ARENA_HIT, {
+      ...hit,
+      gameId: hit.gameId || this._activeArenaId,
+    });
     this._broadcastFromHub(msg);
     this._emit('arena-hit', msg.payload);
   }
@@ -801,10 +1033,11 @@ export class LobbyNetwork {
    * Public: Hub broadcasts arena end
    */
   broadcastArenaEnd(results) {
-    if (!this.isHub) return;
+    if (!this.isHub || results?.gameId !== this._activeArenaId) return;
     const msg = this._createHubMessage(MSG.ARENA_END, results);
     this._broadcastFromHub(msg);
     this._emit('arena-end', msg.payload);
+    this._activeArenaId = null;
   }
 
   /**

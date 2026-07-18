@@ -25,6 +25,8 @@ export function updateBullets(state, lineLineIntersect) {
   const { bullets, W, H, walls, sparks } = state;
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i];
+    b.prevX = b.x;
+    b.prevY = b.y;
     b.x += b.vx;
     b.y += b.vy;
     b.life--;
@@ -48,13 +50,28 @@ export function updateBullets(state, lineLineIntersect) {
   }
 }
 
+function pointSegmentDistance(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  if (len2 <= 0.0001) return dist(px, py, x1, y1);
+  const t = clamp(((px - x1) * dx + (py - y1) * dy) / len2, 0, 1);
+  return dist(px, py, x1 + t * dx, y1 + t * dy);
+}
+
+export function bulletTargetDistance(bullet, target) {
+  const fromX = Number.isFinite(bullet.prevX) ? bullet.prevX : bullet.x;
+  const fromY = Number.isFinite(bullet.prevY) ? bullet.prevY : bullet.y;
+  return pointSegmentDistance(target.x, target.y, fromX, fromY, bullet.x, bullet.y);
+}
+
 export function applyBulletCollisions(state, onHit) {
   const { bullets, players, hitFlashes, sparks } = state;
   for (let bi = bullets.length - 1; bi >= 0; bi--) {
     const b = bullets[bi];
     for (const [pid, player] of players) {
       if (pid === b.from || player.eliminated) continue;
-      const d = dist(b.x, b.y, player.x, player.y);
+      const d = bulletTargetDistance(b, player);
       if (d >= HIT_RADIUS) continue;
 
       const rawDamage = b.damage || 25;

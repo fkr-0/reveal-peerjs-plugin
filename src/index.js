@@ -21,7 +21,6 @@ import { HubMenu } from './hub-menu.js';
 import { PongGame } from './pong.js';
 import { ArenaGame } from './arena-game.js';
 import { CHAT_ICON, USER_ICON, HUB_ICON } from './icons.js';
-import { MSG } from './protocol.js';
 
 const RevealPeerJS = () => ({
   id: 'peerjs',
@@ -75,6 +74,23 @@ const RevealPeerJS = () => ({
       }
       lobbyPanel.toggle();
       document.getElementById('rpjs-btn-lobby').classList.toggle('rpjs-active', lobbyPanel.isVisible());
+    });
+
+    network.on('pong-end', (payload) => {
+      document.querySelectorAll('.rpjs-pong-invite-overlay').forEach((overlay) => {
+        if (overlay.dataset.gameId === payload.gameId) overlay.remove();
+      });
+    });
+
+    network.on('disconnected', () => {
+      if (pongGame) {
+        pongGame.stop();
+        pongGame = null;
+      }
+      if (arenaGame) {
+        arenaGame.stop();
+        arenaGame = null;
+      }
     });
 
     document.getElementById('rpjs-btn-settings').addEventListener('click', () => {
@@ -174,7 +190,10 @@ const RevealPeerJS = () => ({
     // Pong accept
     network.on('pong-accept', (payload) => {
       if (payload.to === network.myId) {
-        pongGame = new PongGame(network, true, payload.from, gameCallbacks);
+        pongGame = new PongGame(network, true, payload.from, {
+          ...gameCallbacks,
+          gameId: payload.gameId,
+        });
         pongGame.start();
       }
     });
@@ -356,7 +375,8 @@ const RevealPeerJS = () => ({
 
     function _showPongInvite(payload) {
       const overlay = document.createElement('div');
-      overlay.className = 'rpjs-modal-overlay';
+      overlay.className = 'rpjs-modal-overlay rpjs-pong-invite-overlay';
+      overlay.dataset.gameId = payload.gameId;
 
       overlay.innerHTML = `
         <div class="rpjs-modal" style="text-align:center">
@@ -375,42 +395,17 @@ const RevealPeerJS = () => ({
 
       overlay.querySelector('#rpjs-pong-accept').addEventListener('click', () => {
         overlay.remove();
-        // Send accept
-        const acceptMsg = {
-          type: MSG.PONG_ACCEPT,
-          payload: {
-            from: network.myId,
-            to: payload.from,
-            fromUsername: network.myUser.username,
-          },
-          timestamp: Date.now(),
-        };
-
-        if (network.isHub) {
-          network._sendToPeer(payload.from, acceptMsg);
-        } else {
-          network._sendToPeer(network.lobbyId, acceptMsg);
-        }
-
-        pongGame = new PongGame(network, false, payload.from, gameCallbacks);
+        network.respondToPongInvite(payload, true);
+        pongGame = new PongGame(network, false, payload.from, {
+          ...gameCallbacks,
+          gameId: payload.gameId,
+        });
         pongGame.start();
       });
 
       overlay.querySelector('#rpjs-pong-decline').addEventListener('click', () => {
         overlay.remove();
-        const declineMsg = {
-          type: MSG.PONG_DECLINE,
-          payload: {
-            from: network.myId,
-            to: payload.from,
-          },
-          timestamp: Date.now(),
-        };
-        if (network.isHub) {
-          network._sendToPeer(payload.from, declineMsg);
-        } else {
-          network._sendToPeer(network.lobbyId, declineMsg);
-        }
+        network.respondToPongInvite(payload, false);
       });
     }
 
@@ -437,19 +432,20 @@ const RevealPeerJS = () => ({
 
     // ========== Cleanup on unload ==========
 
-    window.addEventListener('beforeunload', () => {
-      network.destroy();
-    });
+    const beforeUnloadHandler = () => this.destroy?.();
+    window.addEventListener('beforeunload', beforeUnloadHandler);
 
     // ========== Destroy method for Reveal.js ==========
 
     this.destroy = () => {
+      window.removeEventListener('beforeunload', beforeUnloadHandler);
+      // End active game sessions while the hub connection is still available.
+      if (pongGame) pongGame.stop();
+      if (arenaGame) arenaGame.stop();
       network.destroy();
       if (lobbyPanel) lobbyPanel.destroy();
       if (settingsModal) settingsModal.destroy();
       if (hubMenu) hubMenu.destroy();
-      if (pongGame) pongGame.stop();
-      if (arenaGame) arenaGame.stop();
       toolbar.remove();
       removeStyles();
     };
